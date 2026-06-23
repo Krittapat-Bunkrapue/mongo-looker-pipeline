@@ -1,0 +1,36 @@
+# ─── Secrets / env (ห้ามหลุดเด็ดขาด) ───────────────────────────
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*-key.json
+*credentials*.json
+service-account*.json
+
+# ─── Python ────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ─── IDE / OS ──────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ─── อื่น ๆ ────────────────────────────────────────────────────
+*.log
+local_*

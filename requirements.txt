@@ -1,0 +1,8 @@
+# ─── Runtime dependencies (container) ───────────────────────────
+pymongo[srv]==4.10.1          # MongoDB Atlas (SRV + TLS)
+google-cloud-bigquery==3.27.0 # BigQuery load/query
+pandas==2.2.3                 # transform
+pyarrow==18.1.0               # load_table_from_dataframe backend (NUMERIC/decimal)
+requests==2.32.3              # Google Chat webhook + egress IP check
+tenacity==9.0.0               # retry + exponential backoff
+tzdata==2024.2                # IANA tz (Asia/Bangkok) ใน slim image / Windows
