@@ -1,0 +1,4 @@
+# บังคับ LF ในทุก text file (กัน .sh พังบน Linux/Cloud Shell ด้วย CRLF)
+* text=auto eol=lf
+*.sh text eol=lf
+*.py text eol=lf
