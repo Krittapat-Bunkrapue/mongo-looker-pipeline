@@ -74,7 +74,7 @@ def test_b2b_package_exclusion():
 def test_b2b_company_size_bin_and_windows():
     sql = _sql()
     assert "company_size_range" in sql
-    assert "DIV 10" in sql                       # bin ทีละ 10 คน
+    assert "DIV(COUNT(DISTINCT userId) - 1, 10)" in sql   # bin ทีละ 10 คน (BigQuery DIV() function)
     assert "company_first_event_row" in sql
     assert "team_first_event_row" in sql
 

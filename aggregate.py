@@ -228,7 +228,7 @@ company_range AS (
     CONCAT('(', CAST((num_bin - 1) * 10 + 1 AS STRING), '-', CAST(num_bin * 10 AS STRING), ')')
       AS company_size_range
   FROM (
-    SELECT companyId, ((COUNT(DISTINCT userId) - 1) DIV 10) + 1 AS num_bin
+    SELECT companyId, DIV(COUNT(DISTINCT userId) - 1, 10) + 1 AS num_bin
     FROM b2b_user_base
     GROUP BY companyId
   )
