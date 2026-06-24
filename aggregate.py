@@ -32,6 +32,7 @@ def build_b2c_sql(
     *,
     event_table_fqn: str,
     package_table_fqn: str,
+    users_table_fqn: str,
     b2c_table_fqn: str,
     start_date: date,
     tz_name: str,
@@ -50,21 +51,30 @@ pkg AS (
   FROM `{package_table_fqn}`
   WHERE SAFE_CAST(packageId AS INT64) IN ({_B2C_PACKAGE_IDS})
 ),
+-- user ที่โดน ban (isBanned = TRUE) — ใช้ตัดออกจาก event
+banned AS (
+  SELECT DISTINCT userId
+  FROM `{users_table_fqn}`
+  WHERE isBanned = TRUE
+),
 -- event ในช่วง [start_date, วันนี้) ตาม date_id (Asia/Bangkok)
+-- LEFT ANTI JOIN กับ banned: ตัด event ของ user ที่โดน ban ออก "ก่อน" aggregate ทั้งหมด
 evt AS (
   SELECT DISTINCT
-    event_id AS _id,
-    date_id,
-    eventTimeStamp,
-    userId,
-    eventType,
-    SAFE_CAST(packageId AS INT64) AS packageId,
-    eggToken,
-    chatToken,
-    totalCostThb
-  FROM `{event_table_fqn}`
-  WHERE date_id >= DATE '{start_date.isoformat()}'
-    AND date_id < CURRENT_DATE('{tz_name}')
+    e.event_id AS _id,
+    e.date_id,
+    e.eventTimeStamp,
+    e.userId,
+    e.eventType,
+    SAFE_CAST(e.packageId AS INT64) AS packageId,
+    e.eggToken,
+    e.chatToken,
+    e.totalCostThb
+  FROM `{event_table_fqn}` e
+  LEFT JOIN banned b USING (userId)
+  WHERE b.userId IS NULL                       -- left-anti: เอาเฉพาะ user ที่ไม่อยู่ใน banned
+    AND e.date_id >= DATE '{start_date.isoformat()}'
+    AND e.date_id < CURRENT_DATE('{tz_name}')
 ),
 -- inner join เฉพาะ event ของ B2C package
 evt_pkg AS (
@@ -166,6 +176,7 @@ def run_b2c_aggregate(client: bigquery.Client, cfg) -> int:
     sql = build_b2c_sql(
         event_table_fqn=cfg.bq_table_fqn,
         package_table_fqn=cfg.bq_package_table_fqn,
+        users_table_fqn=cfg.bq_users_table_fqn,
         b2c_table_fqn=cfg.bq_b2c_table_fqn,
         start_date=cfg.start_date,
         tz_name=cfg.timezone_name,

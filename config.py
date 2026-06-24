@@ -89,9 +89,12 @@ class Config:
     mongo_db: str
     mongo_collection: str
     mongo_package_collection: str
+    mongo_users_db: str           # users อยู่คนละ database (Librechat)
+    mongo_users_collection: str
 
     # ── BigQuery: ตารางเพิ่มเติม (master + aggregate) ──
     bq_package_table: str
+    bq_users_table: str
     bq_b2c_table: str
 
     # ── Pipeline logic ──
@@ -118,6 +121,10 @@ class Config:
     @property
     def bq_package_table_fqn(self) -> str:
         return f"{self.gcp_project_id}.{self.bq_dataset}.{self.bq_package_table}"
+
+    @property
+    def bq_users_table_fqn(self) -> str:
+        return f"{self.gcp_project_id}.{self.bq_dataset}.{self.bq_users_table}"
 
     @property
     def bq_b2c_table_fqn(self) -> str:
@@ -187,7 +194,10 @@ def load_config() -> Config:
         mongo_db=_get("MONGO_DB", "credit_service"),
         mongo_collection=_get("MONGO_COLLECTION", "user_usage_event"),
         mongo_package_collection=_get("MONGO_PACKAGE_COLLECTION", "package_master_v3"),
+        mongo_users_db=_get("MONGO_USERS_DB", "Librechat"),
+        mongo_users_collection=_get("MONGO_USERS_COLLECTION", "users"),
         bq_package_table=_get("BQ_PACKAGE_TABLE", "package_master_v3"),
+        bq_users_table=_get("BQ_USERS_TABLE", "librechat_users"),
         bq_b2c_table=_get("BQ_B2C_TABLE", "user_tracking_b2c"),
         timezone=tz,
         timezone_name=tz_name,

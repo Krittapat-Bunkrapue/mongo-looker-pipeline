@@ -12,6 +12,7 @@ def _sql():
     return build_b2c_sql(
         event_table_fqn="proj.credit_service.user_usage_event",
         package_table_fqn="proj.credit_service.package_master_v3",
+        users_table_fqn="proj.credit_service.librechat_users",
         b2c_table_fqn="proj.credit_service.user_tracking_b2c",
         start_date=date(2026, 1, 1),
         tz_name="Asia/Bangkok",
@@ -23,6 +24,19 @@ def test_targets_correct_tables():
     assert "CREATE OR REPLACE TABLE `proj.credit_service.user_tracking_b2c`" in sql
     assert "`proj.credit_service.user_usage_event`" in sql
     assert "`proj.credit_service.package_master_v3`" in sql
+    assert "`proj.credit_service.librechat_users`" in sql
+
+
+def test_excludes_banned_users_before_aggregate():
+    sql = _sql()
+    # banned CTE จาก users ที่ isBanned = TRUE
+    assert "isBanned = TRUE" in sql
+    # left-anti join ใน evt (ก่อน aggregate)
+    assert "LEFT JOIN banned" in sql
+    assert "b.userId IS NULL" in sql
+    # banned ต้องอยู่ก่อน evt_pkg/agg (ตัดออกตั้งแต่ระดับ event)
+    assert sql.index("LEFT JOIN banned") < sql.index("evt_pkg AS")
+    assert sql.index("banned AS") < sql.index("agg AS")
 
 
 def test_partition_and_cluster():

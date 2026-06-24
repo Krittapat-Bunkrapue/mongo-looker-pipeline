@@ -88,6 +88,13 @@ PACKAGE_PROJECTION = {
     "updatedAt": 1,
 }
 
+# projection ของ Librechat.users (เอาแค่ field ที่ใช้ตัด user ที่โดน ban)
+USERS_PROJECTION = {
+    "_id": 0,
+    "userId": 1,
+    "isBanned": 1,
+}
+
 
 def day_bounds_utc(day: date, tz: ZoneInfo) -> tuple[datetime, datetime]:
     """
@@ -182,13 +189,20 @@ class MongoExtractor:
         wait=wait_exponential(multiplier=1, min=2, max=20),
         reraise=True,
     )
-    def extract_full(self, collection_name: str, projection: dict | None = None) -> list[dict]:
+    def extract_full(
+        self,
+        collection_name: str,
+        projection: dict | None = None,
+        db_name: str | None = None,
+    ) -> list[dict]:
         """
-        ดึงทั้ง collection (ใช้กับ master/reference table ขนาดเล็ก เช่น package_master_v3)
+        ดึงทั้ง collection (ใช้กับ master/reference ขนาดเล็ก เช่น package_master_v3, users)
         full reload — ไม่ใช้ incremental เพราะเป็นตารางอ้างอิงที่เปลี่ยนไม่บ่อย
+        db_name: ระบุ database อื่นได้ (เช่น users อยู่ใน 'Librechat')
         """
         assert self._client is not None, "ต้องใช้ภายใน context manager"
-        coll = self._client[self._db_name][collection_name]
+        db = db_name or self._db_name
+        coll = self._client[db][collection_name]
         docs = list(coll.find({}, projection))
-        log.info("extracted %d docs from %s (full)", len(docs), collection_name)
+        log.info("extracted %d docs from %s.%s (full)", len(docs), db, collection_name)
         return docs

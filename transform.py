@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from load import COLUMN_NAMES, PACKAGE_COLUMN_NAMES
+from load import COLUMN_NAMES, PACKAGE_COLUMN_NAMES, USERS_COLUMN_NAMES
 
 # precision ของเงินที่เก็บใน BQ NUMERIC
 _MONEY_QUANT = Decimal("0.000001")
@@ -92,6 +92,17 @@ def _to_int(value) -> int | None:
 
 def _to_str(value) -> str | None:
     return None if value is None else str(value)
+
+
+def _to_bool(value) -> bool | None:
+    """bool / 'true'/'false' / 1/0 -> bool (หรือ None)."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes", "t")
+    return bool(value)
 
 
 def _bangkok_date(ts_utc: datetime, tz: ZoneInfo) -> date:
@@ -188,4 +199,26 @@ def normalize_packages(
         df[f] = pd.to_datetime(df[f], utc=True)
     for f in _PACKAGE_INT_FIELDS:
         df[f] = df[f].astype("Int64")
+    return df
+
+
+# ── Librechat.users (เก็บแค่ userId + isBanned) ──────────────────────
+def normalize_users(
+    records: list[dict],
+    *,
+    ingested_at: datetime | None = None,
+) -> pd.DataFrame:
+    """แปลง docs ของ users -> DataFrame (userId, isBanned)."""
+    ingested_at = ingested_at or datetime.now(timezone.utc)
+    rows = [
+        {
+            "userId": _to_str(d.get("userId")),
+            "isBanned": _to_bool(d.get("isBanned")),
+            "_ingested_at": ingested_at,
+        }
+        for d in records
+    ]
+    df = pd.DataFrame(rows, columns=USERS_COLUMN_NAMES)
+    df["_ingested_at"] = pd.to_datetime(df["_ingested_at"], utc=True)
+    df["isBanned"] = df["isBanned"].astype("boolean")  # nullable bool
     return df

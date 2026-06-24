@@ -92,6 +92,16 @@ PACKAGE_SCHEMA: list[bigquery.SchemaField] = [
 ]
 PACKAGE_COLUMN_NAMES: list[str] = [f.name for f in PACKAGE_SCHEMA]
 
+# ─────────────────────────────────────────────────────────────────────
+# Librechat.users — เก็บแค่ field ที่ใช้ตัด user ที่โดน ban (full reload)
+# ─────────────────────────────────────────────────────────────────────
+USERS_SCHEMA: list[bigquery.SchemaField] = [
+    bigquery.SchemaField("userId", "STRING", mode="REQUIRED"),
+    bigquery.SchemaField("isBanned", "BOOLEAN"),
+    bigquery.SchemaField("_ingested_at", "TIMESTAMP", mode="REQUIRED"),
+]
+USERS_COLUMN_NAMES: list[str] = [f.name for f in USERS_SCHEMA]
+
 
 def partition_decorator(table_fqn: str, day: date) -> str:
     """คืน 'project.dataset.table$YYYYMMDD' สำหรับ load เข้า partition เดียว."""

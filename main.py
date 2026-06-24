@@ -26,9 +26,9 @@ import aggregate
 import load
 import state
 from config import Config, ConfigError, load_config
-from extract import PACKAGE_PROJECTION, MongoExtractor
+from extract import PACKAGE_PROJECTION, USERS_PROJECTION, MongoExtractor
 from notify import Notifier
-from transform import normalize_packages, normalize_records
+from transform import normalize_packages, normalize_records, normalize_users
 
 logging.basicConfig(
     level=logging.INFO,
@@ -142,12 +142,21 @@ def run() -> int:
             cfg.timezone,
             id_buffer_hours=cfg.id_index_buffer_hours,
         ) as ex:
-            # 1) master table: package_master_v3 (full reload ทุกรอบ)
+            # 1a) master: package_master_v3 (full reload ทุกรอบ)
             stage = "extract-package"
             pkg_docs = ex.extract_full(cfg.mongo_package_collection, PACKAGE_PROJECTION)
             stage = "load-package"
             pkg_df = normalize_packages(pkg_docs, ingested_at=ingested_at)
             pkg_rows = load.write_full_table(client, cfg.bq_package_table_fqn, pkg_df, load.PACKAGE_SCHEMA)
+
+            # 1b) master: Librechat.users (full reload) — ใช้ตัด user ที่โดน ban ตอน aggregate
+            stage = "extract-users"
+            users_docs = ex.extract_full(
+                cfg.mongo_users_collection, USERS_PROJECTION, db_name=cfg.mongo_users_db
+            )
+            stage = "load-users"
+            users_df = normalize_users(users_docs, ingested_at=ingested_at)
+            users_rows = load.write_full_table(client, cfg.bq_users_table_fqn, users_df, load.USERS_SCHEMA)
 
             # 2) event: incremental ราย วัน
             for day in dates:
@@ -173,13 +182,13 @@ def run() -> int:
         stage = "aggregate-b2c"
         b2c_rows = aggregate.run_b2c_aggregate(client, cfg)
 
-        log.info("เสร็จสมบูรณ์: event=%d แถว, package=%d แถว, B2C=%d แถว",
-                 total_rows, pkg_rows, b2c_rows)
+        log.info("เสร็จสมบูรณ์: event=%d, package=%d, users=%d, B2C=%d แถว",
+                 total_rows, pkg_rows, users_rows, b2c_rows)
         notifier.success(
             processed_dates=dates,
             total_rows=total_rows,
             egress_ip=egress_ip or "n/a",
-            extra=f"package={pkg_rows:,} แถว · B2C={b2c_rows:,} แถว",
+            extra=f"package={pkg_rows:,} · users={users_rows:,} · B2C={b2c_rows:,} แถว",
         )
         return 0
 
