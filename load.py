@@ -74,6 +74,24 @@ STATE_SCHEMA: list[bigquery.SchemaField] = [
     bigquery.SchemaField("updated_at", "TIMESTAMP", mode="REQUIRED"),
 ]
 
+# ─────────────────────────────────────────────────────────────────────
+# package_master_v3 — master/reference table (lean) เก็บแบบ full reload
+# ─────────────────────────────────────────────────────────────────────
+PACKAGE_SCHEMA: list[bigquery.SchemaField] = [
+    bigquery.SchemaField("packageId", "INTEGER", mode="REQUIRED"),
+    bigquery.SchemaField("packageName", "STRING"),
+    bigquery.SchemaField("packageType", "STRING"),
+    bigquery.SchemaField("tierName", "STRING"),
+    bigquery.SchemaField("priceThb", "NUMERIC"),
+    bigquery.SchemaField("eggToken", "INTEGER"),
+    bigquery.SchemaField("durationDay", "INTEGER"),
+    bigquery.SchemaField("durationMonth", "INTEGER"),
+    bigquery.SchemaField("createdAt", "TIMESTAMP"),
+    bigquery.SchemaField("updatedAt", "TIMESTAMP"),
+    bigquery.SchemaField("_ingested_at", "TIMESTAMP", mode="REQUIRED"),
+]
+PACKAGE_COLUMN_NAMES: list[str] = [f.name for f in PACKAGE_SCHEMA]
+
 
 def partition_decorator(table_fqn: str, day: date) -> str:
     """คืน 'project.dataset.table$YYYYMMDD' สำหรับ load เข้า partition เดียว."""
@@ -163,4 +181,29 @@ def write_day(
     load_job = client.load_table_from_dataframe(df, target, job_config=job_config)
     load_job.result()  # รอจบ + raise ถ้า error
     log.info("wrote %d rows -> %s", len(df), target)
+    return len(df)
+
+
+def write_full_table(
+    client: bigquery.Client,
+    table_fqn: str,
+    df: pd.DataFrame,
+    schema: list[bigquery.SchemaField],
+) -> int:
+    """
+    เขียนทับทั้งตารางแบบ atomic (WRITE_TRUNCATE) — ใช้กับ master table ที่ full reload
+    สร้างตารางให้อัตโนมัติถ้ายังไม่มี (ตาม schema ที่ส่งมา)
+    """
+    expected = [f.name for f in schema]
+    if list(df.columns) != expected:
+        raise ValueError(
+            f"schema drift (master): columns ไม่ตรง schema. "
+            f"ได้={list(df.columns)} คาด={expected}"
+        )
+    job_config = bigquery.LoadJobConfig(
+        schema=schema,
+        write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+    )
+    client.load_table_from_dataframe(df, table_fqn, job_config=job_config).result()
+    log.info("wrote %d rows -> %s (full reload)", len(df), table_fqn)
     return len(df)

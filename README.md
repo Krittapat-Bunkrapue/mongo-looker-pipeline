@@ -27,6 +27,7 @@ Cloud Scheduler (06:00 Asia/Bangkok)
 | `extract.py` | ต่อ MongoDB (TLS+timeout) + aggregation pipeline ราย วัน |
 | `transform.py` | pandas: สกัด `date_id` (Asia/Bangkok), คำนวณ `totalCostThb`, แปลง type |
 | `load.py` | เขียน BigQuery แบบ idempotent (atomic partition replace) + schema |
+| `aggregate.py` | BigQuery SQL สร้างตาราง B2C (`user_tracking_b2c`) — แปลงจาก notebook PySpark |
 | `notify.py` | Google Chat webhook: success / fail / IP-drift |
 | `main.py` | orchestrate ทั้ง pipeline + error handling |
 | `deploy.sh` / `teardown.sh` | สร้าง / ลบ resource บน GCP (idempotent) |
@@ -50,6 +51,25 @@ Cloud Scheduler (06:00 Asia/Bangkok)
 - **ความลับอยู่ใน Secret Manager เท่านั้น** — `config.py` mask ค่าก่อน log เสมอ
 
 ---
+
+## 📦 ตารางที่ pipeline สร้างใน BigQuery
+
+| ตาราง | grain | วิธีเขียน | ใช้ทำอะไร |
+|---|---|---|---|
+| `credit_service.user_usage_event` | 1 แถว/event | incremental ราย วัน (atomic partition replace) | ข้อมูล event ดิบ + `date_id`/`totalCostThb` |
+| `credit_service.package_master_v3` | 1 แถว/package | full reload ทุกรอบ | master ของ package (lean: id, name, price, ...) |
+| `credit_service.pipeline_state` | 1 แถว/pipeline | upsert | watermark |
+| `credit_service.user_tracking_b2c` | 1 แถว/(month,week,date,user) | **rebuild ทุกรอบ** (BigQuery SQL) | metric B2C: Token Used, totalCostThb, Trial Conversion, Free Trial Token, package list, flags |
+
+### ตาราง B2C (`user_tracking_b2c`) — แปลงจาก notebook PySpark เดิม
+
+`aggregate.py` แปลง logic section **B2C** จาก notebook เป็น BigQuery SQL ตรง ๆ (กรอง `packageId IN (1,2,3,12)`,
+window `package_row`/`event_row`/`current_package_flag`, union Trial Conversion→Subscribe, negate eggToken)
+อ่านจาก `user_usage_event` + `package_master_v3` ที่ pipeline อัปเดตแล้ว → `CREATE OR REPLACE TABLE` (rebuild เต็ม)
+
+> ⚠️ **ต่างจาก notebook เดิมเล็กน้อยโดยตั้งใจ:** `date_id`/`week_id`/`month_id` ยึด **Asia/Bangkok**
+> (notebook เดิม `to_date()` ตาม tz ของ cluster ซึ่งอาจเป็น UTC) → ตัวเลขรายวันอาจต่างกันที่ event ใกล้เที่ยงคืน
+> ส่วน B2B จะเพิ่มภายหลัง (ตอนนี้ทำเฉพาะ B2C)
 
 ## 🚀 วิธี Deploy
 

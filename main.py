@@ -22,12 +22,13 @@ import requests
 from google.cloud import bigquery
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
+import aggregate
 import load
 import state
 from config import Config, ConfigError, load_config
-from extract import MongoExtractor
+from extract import PACKAGE_PROJECTION, MongoExtractor
 from notify import Notifier
-from transform import normalize_records
+from transform import normalize_packages, normalize_records
 
 logging.basicConfig(
     level=logging.INFO,
@@ -126,13 +127,11 @@ def run() -> int:
             today_local=today_local,
         )
 
-        if not dates:
-            log.info("ไม่มีวันใหม่ให้ประมวลผล (watermark=%s)", watermark)
-            notifier.success(processed_dates=[], total_rows=0, egress_ip=egress_ip or "n/a")
-            return 0
-
-        log.info("จะประมวลผล %d วัน: %s → %s",
-                 len(dates), dates[0].isoformat(), dates[-1].isoformat())
+        if dates:
+            log.info("จะประมวลผล event %d วัน: %s → %s",
+                     len(dates), dates[0].isoformat(), dates[-1].isoformat())
+        else:
+            log.info("ไม่มีวันใหม่ของ event (watermark=%s) — จะ refresh package + rebuild B2C", watermark)
 
         total_rows = 0
         ingested_at = datetime.now(cfg.timezone).astimezone()
@@ -143,6 +142,14 @@ def run() -> int:
             cfg.timezone,
             id_buffer_hours=cfg.id_index_buffer_hours,
         ) as ex:
+            # 1) master table: package_master_v3 (full reload ทุกรอบ)
+            stage = "extract-package"
+            pkg_docs = ex.extract_full(cfg.mongo_package_collection, PACKAGE_PROJECTION)
+            stage = "load-package"
+            pkg_df = normalize_packages(pkg_docs, ingested_at=ingested_at)
+            pkg_rows = load.write_full_table(client, cfg.bq_package_table_fqn, pkg_df, load.PACKAGE_SCHEMA)
+
+            # 2) event: incremental ราย วัน
             for day in dates:
                 stage = f"extract:{day.isoformat()}"
                 docs = ex.extract_day(day)
@@ -162,8 +169,18 @@ def run() -> int:
                 stage = f"watermark:{day.isoformat()}"
                 state.set_watermark(client, cfg.bq_state_table_fqn, cfg.bq_table, day)
 
-        log.info("เสร็จสมบูรณ์: เขียนรวม %d แถว", total_rows)
-        notifier.success(processed_dates=dates, total_rows=total_rows, egress_ip=egress_ip or "n/a")
+        # 3) rebuild ตาราง B2C ด้วย BigQuery SQL (อ่านจาก event + package ที่เพิ่งอัปเดต)
+        stage = "aggregate-b2c"
+        b2c_rows = aggregate.run_b2c_aggregate(client, cfg)
+
+        log.info("เสร็จสมบูรณ์: event=%d แถว, package=%d แถว, B2C=%d แถว",
+                 total_rows, pkg_rows, b2c_rows)
+        notifier.success(
+            processed_dates=dates,
+            total_rows=total_rows,
+            egress_ip=egress_ip or "n/a",
+            extra=f"package={pkg_rows:,} แถว · B2C={b2c_rows:,} แถว",
+        )
         return 0
 
     except ConfigError as exc:

@@ -88,6 +88,11 @@ class Config:
     # ── MongoDB ──
     mongo_db: str
     mongo_collection: str
+    mongo_package_collection: str
+
+    # ── BigQuery: ตารางเพิ่มเติม (master + aggregate) ──
+    bq_package_table: str
+    bq_b2c_table: str
 
     # ── Pipeline logic ──
     timezone: ZoneInfo
@@ -109,6 +114,14 @@ class Config:
     @property
     def bq_state_table_fqn(self) -> str:
         return f"{self.gcp_project_id}.{self.bq_dataset}.{self.bq_state_table}"
+
+    @property
+    def bq_package_table_fqn(self) -> str:
+        return f"{self.gcp_project_id}.{self.bq_dataset}.{self.bq_package_table}"
+
+    @property
+    def bq_b2c_table_fqn(self) -> str:
+        return f"{self.gcp_project_id}.{self.bq_dataset}.{self.bq_b2c_table}"
 
     @property
     def bq_dataset_fqn(self) -> str:
@@ -173,6 +186,9 @@ def load_config() -> Config:
         bq_state_table=_get("BQ_STATE_TABLE", "pipeline_state"),
         mongo_db=_get("MONGO_DB", "credit_service"),
         mongo_collection=_get("MONGO_COLLECTION", "user_usage_event"),
+        mongo_package_collection=_get("MONGO_PACKAGE_COLLECTION", "package_master_v3"),
+        bq_package_table=_get("BQ_PACKAGE_TABLE", "package_master_v3"),
+        bq_b2c_table=_get("BQ_B2C_TABLE", "user_tracking_b2c"),
         timezone=tz,
         timezone_name=tz_name,
         start_date=_parse_date("START_DATE", _get("START_DATE", "2026-01-01")),

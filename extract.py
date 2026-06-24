@@ -72,6 +72,22 @@ _PROJECTION = {
     "deductionBreakdown": 1,
 }
 
+# projection ของ master table package_master_v3 (เก็บแบบ lean — ตัด array modelList/capabilities)
+# _id:0 = ไม่ดึง _id (ตารางใช้ packageId เป็น key)
+PACKAGE_PROJECTION = {
+    "_id": 0,
+    "packageId": 1,
+    "packageName": 1,
+    "packageType": 1,
+    "tierName": 1,
+    "priceThb": 1,
+    "eggToken": 1,
+    "durationDay": 1,
+    "durationMonth": 1,
+    "createdAt": 1,
+    "updatedAt": 1,
+}
+
 
 def day_bounds_utc(day: date, tz: ZoneInfo) -> tuple[datetime, datetime]:
     """
@@ -158,4 +174,21 @@ class MongoExtractor:
         pipeline = build_pipeline(day, self._tz, self._id_buffer_hours)
         docs = list(collection.aggregate(pipeline, allowDiskUse=True))
         log.info("extracted %d docs for %s", len(docs), day.isoformat())
+        return docs
+
+    @retry(
+        retry=retry_if_exception_type(PyMongoError),
+        stop=stop_after_attempt(4),
+        wait=wait_exponential(multiplier=1, min=2, max=20),
+        reraise=True,
+    )
+    def extract_full(self, collection_name: str, projection: dict | None = None) -> list[dict]:
+        """
+        ดึงทั้ง collection (ใช้กับ master/reference table ขนาดเล็ก เช่น package_master_v3)
+        full reload — ไม่ใช้ incremental เพราะเป็นตารางอ้างอิงที่เปลี่ยนไม่บ่อย
+        """
+        assert self._client is not None, "ต้องใช้ภายใน context manager"
+        coll = self._client[self._db_name][collection_name]
+        docs = list(coll.find({}, projection))
+        log.info("extracted %d docs from %s (full)", len(docs), collection_name)
         return docs

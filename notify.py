@@ -48,17 +48,26 @@ class Notifier:
         log.info("notify sent (%d chars)", len(text))
 
     # ── public ───────────────────────────────────────────────────────
-    def success(self, *, processed_dates: list[date], total_rows: int, egress_ip: str) -> None:
+    def success(
+        self,
+        *,
+        processed_dates: list[date],
+        total_rows: int,
+        egress_ip: str,
+        extra: str | None = None,
+    ) -> None:
         if processed_dates:
             span = f"{processed_dates[0].isoformat()} → {processed_dates[-1].isoformat()}"
         else:
             span = "ไม่มีวันใหม่ให้ประมวลผล"
         text = (
             "✅ *Pipeline สำเร็จ* — user_usage_event\n"
-            f"• ช่วงวันที่: {span} ({len(processed_dates)} วัน)\n"
-            f"• แถวที่เขียน: {total_rows:,}\n"
-            f"• Egress IP: {egress_ip}"
+            f"• ช่วงวันที่ (event): {span} ({len(processed_dates)} วัน)\n"
+            f"• event ที่เขียน: {total_rows:,} แถว\n"
         )
+        if extra:
+            text += f"• {extra}\n"
+        text += f"• Egress IP: {egress_ip}"
         self._safe_send(text)
 
     def failure(self, *, error: str, stage: str, egress_ip: str | None = None) -> None:

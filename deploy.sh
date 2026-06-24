@@ -40,6 +40,9 @@ SECRET_GCHAT="gchat-webhook-url"
 DATASET="credit_service"
 TABLE="user_usage_event"
 STATE_TABLE="pipeline_state"
+PACKAGE_COLLECTION="package_master_v3"   # master table ใน Mongo (credit_service)
+PACKAGE_TABLE="package_master_v3"        # ตาราง master ใน BigQuery
+B2C_TABLE="user_tracking_b2c"            # ตาราง aggregate B2C (rebuild ทุกรอบ)
 
 # ── pipeline config ──
 START_DATE="2026-01-01"
@@ -178,7 +181,7 @@ gcloud run jobs deploy "$JOB_NAME" \
   --service-account="$SA_JOB_EMAIL" \
   --network="$NETWORK" --subnet="$SUBNET" --vpc-egress=all-traffic \
   --set-secrets="MONGODB_URI=${SECRET_MONGO}:latest,GCHAT_WEBHOOK_URL=${SECRET_GCHAT}:latest" \
-  --set-env-vars="GCP_PROJECT_ID=${PROJECT_ID},BQ_LOCATION=${REGION},BQ_DATASET=${DATASET},BQ_TABLE=${TABLE},BQ_STATE_TABLE=${STATE_TABLE},MONGO_DB=${DATASET},MONGO_COLLECTION=${TABLE},PIPELINE_TIMEZONE=${PIPELINE_TZ},START_DATE=${START_DATE},LOOKBACK_DAYS=${LOOKBACK_DAYS},EXCHANGE_RATE=${EXCHANGE_RATE},ID_INDEX_BUFFER_HOURS=${ID_INDEX_BUFFER_HOURS},EXPECTED_EGRESS_IP=${EGRESS_IP}" \
+  --set-env-vars="GCP_PROJECT_ID=${PROJECT_ID},BQ_LOCATION=${REGION},BQ_DATASET=${DATASET},BQ_TABLE=${TABLE},BQ_STATE_TABLE=${STATE_TABLE},MONGO_DB=${DATASET},MONGO_COLLECTION=${TABLE},PIPELINE_TIMEZONE=${PIPELINE_TZ},START_DATE=${START_DATE},LOOKBACK_DAYS=${LOOKBACK_DAYS},EXCHANGE_RATE=${EXCHANGE_RATE},ID_INDEX_BUFFER_HOURS=${ID_INDEX_BUFFER_HOURS},MONGO_PACKAGE_COLLECTION=${PACKAGE_COLLECTION},BQ_PACKAGE_TABLE=${PACKAGE_TABLE},BQ_B2C_TABLE=${B2C_TABLE},EXPECTED_EGRESS_IP=${EGRESS_IP}" \
   --max-retries=1 --task-timeout=3600 --memory=1Gi --cpu=1 >/dev/null
 ok "Cloud Run Job '$JOB_NAME' deployed (egress -> $EGRESS_IP)"
 

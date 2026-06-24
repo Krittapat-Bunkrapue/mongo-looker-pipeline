@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from load import COLUMN_NAMES
+from load import COLUMN_NAMES, PACKAGE_COLUMN_NAMES
 
 # precision ของเงินที่เก็บใน BQ NUMERIC
 _MONEY_QUANT = Decimal("0.000001")
@@ -49,6 +49,10 @@ def _to_str_id(value) -> str:
     if isinstance(value, dict) and "$oid" in value:
         return str(value["$oid"])
     return str(value)
+
+
+def _to_utc_optional(value) -> datetime | None:
+    return None if value is None else _to_utc(value)
 
 
 def _to_utc(value) -> datetime:
@@ -148,4 +152,40 @@ def normalize_records(
         df[f] = df[f].astype("Int64")  # nullable int (รองรับค่าติดลบ/None)
     # date_id, *CostUsd, totalCostThb คงเป็น object (date / Decimal) ให้ pyarrow map ตาม schema
 
+    return df
+
+
+# ── package_master_v3 (master table, lean) ───────────────────────────
+_PACKAGE_INT_FIELDS = ("packageId", "eggToken", "durationDay", "durationMonth")
+
+
+def normalize_packages(
+    records: list[dict],
+    *,
+    ingested_at: datetime | None = None,
+) -> pd.DataFrame:
+    """แปลง docs ของ package_master_v3 -> DataFrame (lean schema)."""
+    ingested_at = ingested_at or datetime.now(timezone.utc)
+    rows = []
+    for d in records:
+        price = _to_decimal(d.get("priceThb"))
+        rows.append({
+            "packageId": _to_int(d.get("packageId")),
+            "packageName": _to_str(d.get("packageName")),
+            "packageType": _to_str(d.get("packageType")),
+            "tierName": _to_str(d.get("tierName")),
+            "priceThb": price,  # Decimal -> NUMERIC (None ได้)
+            "eggToken": _to_int(d.get("eggToken")),
+            "durationDay": _to_int(d.get("durationDay")),
+            "durationMonth": _to_int(d.get("durationMonth")),
+            "createdAt": _to_utc_optional(d.get("createdAt")),
+            "updatedAt": _to_utc_optional(d.get("updatedAt")),
+            "_ingested_at": ingested_at,
+        })
+
+    df = pd.DataFrame(rows, columns=PACKAGE_COLUMN_NAMES)
+    for f in ("createdAt", "updatedAt", "_ingested_at"):
+        df[f] = pd.to_datetime(df[f], utc=True)
+    for f in _PACKAGE_INT_FIELDS:
+        df[f] = df[f].astype("Int64")
     return df
