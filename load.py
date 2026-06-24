@@ -105,8 +105,10 @@ USERS_COLUMN_NAMES: list[str] = [f.name for f in USERS_SCHEMA]
 # ─────────────────────────────────────────────────────────────────────
 # B2B master tables (full reload): users (team/company), company, team
 # ─────────────────────────────────────────────────────────────────────
+# หมายเหตุ: key (userId/companyId/teamId) เป็น NULLABLE เพราะ source อาจมี null
+# row ที่ key เป็น null จะถูก inner-join ตัดทิ้งตอน aggregate อยู่แล้ว
 B2B_USERS_SCHEMA: list[bigquery.SchemaField] = [
-    bigquery.SchemaField("userId", "STRING", mode="REQUIRED"),
+    bigquery.SchemaField("userId", "STRING"),
     bigquery.SchemaField("teamId", "STRING"),
     bigquery.SchemaField("teamName", "STRING"),
     bigquery.SchemaField("_ingested_at", "TIMESTAMP", mode="REQUIRED"),
@@ -114,14 +116,14 @@ B2B_USERS_SCHEMA: list[bigquery.SchemaField] = [
 B2B_USERS_COLUMN_NAMES: list[str] = [f.name for f in B2B_USERS_SCHEMA]
 
 B2B_COMPANY_SCHEMA: list[bigquery.SchemaField] = [
-    bigquery.SchemaField("companyId", "STRING", mode="REQUIRED"),
+    bigquery.SchemaField("companyId", "STRING"),
     bigquery.SchemaField("companyName", "STRING"),
     bigquery.SchemaField("_ingested_at", "TIMESTAMP", mode="REQUIRED"),
 ]
 B2B_COMPANY_COLUMN_NAMES: list[str] = [f.name for f in B2B_COMPANY_SCHEMA]
 
 B2B_TEAM_SCHEMA: list[bigquery.SchemaField] = [
-    bigquery.SchemaField("teamId", "STRING", mode="REQUIRED"),
+    bigquery.SchemaField("teamId", "STRING"),
     bigquery.SchemaField("companyId", "STRING"),
     bigquery.SchemaField("_ingested_at", "TIMESTAMP", mode="REQUIRED"),
 ]
