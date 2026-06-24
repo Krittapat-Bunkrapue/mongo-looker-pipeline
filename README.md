@@ -52,15 +52,25 @@ Cloud Scheduler (06:00 Asia/Bangkok)
 
 ---
 
+## 🖧 2 Mongo server + 2 BigQuery dataset
+
+pipeline เดียว (job เดียว) ต่อ **2 Mongo server** แล้วเขียนแยก **2 dataset**:
+- **B2C** ← server `mongodb-uri` (secret) → dataset `B2C`
+- **B2B** ← server `mongodb-uri-b2b` (secret, คนละ server) → dataset `B2B`
+
+ทั้ง 2 server ต้อง whitelist egress IP **`34.21.253.252`** และ Mongo user อ่าน `credit_service` + `Librechat` ได้
+
 ## 📦 ตารางที่ pipeline สร้างใน BigQuery
 
-| ตาราง | grain | วิธีเขียน | ใช้ทำอะไร |
+| ตาราง (มีทั้งใน `B2C` และ `B2B`) | grain | วิธีเขียน | ใช้ทำอะไร |
 |---|---|---|---|
-| `credit_service.user_usage_event` | 1 แถว/event | incremental ราย วัน (atomic partition replace) | ข้อมูล event ดิบ + `date_id`/`totalCostThb` |
-| `credit_service.package_master_v3` | 1 แถว/package | full reload ทุกรอบ | master ของ package (lean: id, name, price, ...) |
-| `credit_service.librechat_users` | 1 แถว/user | full reload ทุกรอบ | `userId` + `isBanned` (จาก db `Librechat`) — ใช้ตัด user ที่โดน ban |
-| `credit_service.pipeline_state` | 1 แถว/pipeline | upsert | watermark |
-| `credit_service.user_tracking_b2c` | 1 แถว/(month,week,date,user) | **rebuild ทุกรอบ** (BigQuery SQL) | metric B2C: Token Used, totalCostThb, Trial Conversion, Free Trial Token, package list, flags |
+| `<ds>.user_usage_event` | 1 แถว/event | incremental ราย วัน (atomic partition replace) | event ดิบ + `date_id`/`totalCostThb` (watermark แยกแต่ละ dataset) |
+| `<ds>.package_master_v3` | 1 แถว/package | full reload ทุกรอบ | master ของ package (lean) |
+| `<ds>.librechat_users` | 1 แถว/user | full reload ทุกรอบ | B2C: `userId`+`isBanned` / B2B: `userId`+`teamId`+`teamName` |
+| `<ds>.pipeline_state` | 1 แถว/pipeline | upsert | watermark |
+| **B2C เท่านั้น** `B2C.user_tracking_b2c` | 1 แถว/(month,week,date,user) | **rebuild ทุกรอบ** | metric B2C + Trial Conversion + Free Trial Token (ตัด banned) |
+| **B2B เท่านั้น** `B2B.b2b_company`, `B2B.b2b_team` | master | full reload | map team→company + ขนาดบริษัท |
+| **B2B เท่านั้น** `B2B.user_tracking_b2b` | 1 แถว/(month,week,date,user) | **rebuild ทุกรอบ** | metric B2B + มิติ team/company + `company_size_range` (ไม่ตัด banned) |
 
 ### ตาราง B2C (`user_tracking_b2c`) — แปลงจาก notebook PySpark เดิม
 
