@@ -15,8 +15,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# copy source
-COPY config.py state.py extract.py transform.py load.py notify.py main.py ./
+# copy source (ทุก .py ที่ root — กันลืมเพิ่มไฟล์ใหม่; tests/ ไม่ถูก copy)
+COPY *.py ./
 
 # รันแบบ non-root (least privilege)
 RUN useradd --create-home --uid 10001 appuser \
