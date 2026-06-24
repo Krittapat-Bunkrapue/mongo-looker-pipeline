@@ -299,6 +299,83 @@ JOIN pkg pk USING (packageName)
 """.strip()
 
 
+def build_total_view_sql(*, b2c_table_fqn: str, b2b_table_fqn: str, view_fqn: str) -> str:
+    """
+    VIEW รวม B2C + B2B (เลียนแบบ df_total_final ใน notebook):
+      • เพิ่มคอลัมน์ version ('B2C'/'B2B')
+      • unionByName allowMissingColumns: คอลัมน์ที่มีฝั่งเดียว อีกฝั่งเป็น null
+      • fillna('null'): คอลัมน์ STRING ที่เป็น null -> ข้อความ 'null' (คอลัมน์ตัวเลขคง null)
+    เป็น VIEW -> อัปเดตตามตารางต้นทางอัตโนมัติ ไม่ต้อง rebuild
+    """
+    return f"""
+CREATE OR REPLACE VIEW `{view_fqn}` AS
+SELECT
+  'B2C' AS version,
+  COALESCE(month_id, 'null') AS month_id,
+  COALESCE(week_id, 'null') AS week_id,
+  date_id,
+  COALESCE(userId, 'null') AS userId,
+  COALESCE(packageName, 'null') AS packageName,
+  trial_conversion_cnt,
+  token_used,
+  totalCostThb,
+  free_trial_token_used,
+  COALESCE(package_1, 'null') AS package_1,
+  COALESCE(package_2, 'null') AS package_2,
+  'null' AS teamId,
+  'null' AS teamName,
+  'null' AS companyId,
+  'null' AS companyName,
+  CAST(NULL AS INT64) AS number_of_user_bin,
+  'null' AS company_size_range,
+  event_row,
+  CAST(NULL AS INT64) AS company_first_event_row,
+  CAST(NULL AS INT64) AS team_first_event_row,
+  current_package_flag,
+  packageId,
+  run_date
+FROM `{b2c_table_fqn}`
+UNION ALL
+SELECT
+  'B2B' AS version,
+  COALESCE(month_id, 'null'),
+  COALESCE(week_id, 'null'),
+  date_id,
+  COALESCE(userId, 'null'),
+  COALESCE(packageName, 'null'),
+  CAST(NULL AS INT64) AS trial_conversion_cnt,
+  token_used,
+  totalCostThb,
+  CAST(NULL AS INT64) AS free_trial_token_used,
+  COALESCE(package_1, 'null'),
+  COALESCE(package_2, 'null'),
+  COALESCE(teamId, 'null'),
+  COALESCE(teamName, 'null'),
+  COALESCE(companyId, 'null'),
+  COALESCE(companyName, 'null'),
+  number_of_user_bin,
+  COALESCE(company_size_range, 'null'),
+  event_row,
+  company_first_event_row,
+  team_first_event_row,
+  current_package_flag,
+  packageId,
+  run_date
+FROM `{b2b_table_fqn}`
+""".strip()
+
+
+def ensure_total_view(client: bigquery.Client, cfg) -> None:
+    """สร้าง/อัปเดต VIEW รวม B2C+B2B."""
+    sql = build_total_view_sql(
+        b2c_table_fqn=cfg.bq_b2c_table_fqn,
+        b2b_table_fqn=cfg.bq_b2b_agg_fqn,
+        view_fqn=cfg.bq_total_view_fqn,
+    )
+    client.query(sql).result()
+    log.info("ensured total view %s", cfg.bq_total_view_fqn)
+
+
 def run_b2b_aggregate(client: bigquery.Client, cfg) -> int:
     """รัน SQL สร้างตาราง B2B แล้วคืนจำนวนแถวผลลัพธ์."""
     sql = build_b2b_sql(

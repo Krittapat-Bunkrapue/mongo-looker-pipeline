@@ -37,11 +37,13 @@ SECRET_MONGO="mongodb-uri"               # B2C Mongo server
 SECRET_MONGO_B2B="mongodb-uri-b2b"       # B2B Mongo server (คนละ server)
 SECRET_GCHAT="gchat-webhook-url"
 
-# ── BigQuery datasets (B2C / B2B แยกกัน) ──
+# ── BigQuery datasets (B2C / B2B / Total) ──
 DATASET_B2C="B2C"                        # dataset ฝั่ง B2C ใน BigQuery
 DATASET_B2B="B2B"                        # dataset ฝั่ง B2B ใน BigQuery
+DATASET_TOTAL="Total"                    # dataset ของ view รวม
 TABLE="user_usage_event"
 STATE_TABLE="pipeline_state"
+TOTAL_VIEW="user_tracking_total"
 
 # ── MongoDB (ชื่อ db/collection เหมือนกันทั้ง 2 server) ──
 MONGO_DB_NAME="credit_service"           # Mongo database (ไม่เกี่ยวกับชื่อ BQ dataset)
@@ -135,10 +137,10 @@ ok "VPC/NAT พร้อม — egress ทั้งหมดของ subnet จ
 # ══════════════════════ 4) BigQuery datasets (B2C + B2B) ════════════════════
 log "4) BigQuery datasets (B2C + B2B)"
 # สร้างแค่ dataset — ตารางทั้งหมด code จะ ensure/สร้างให้เอง (partition/schema ตรงกับ load.py)
-for ds in "$DATASET_B2C" "$DATASET_B2B"; do
+for ds in "$DATASET_B2C" "$DATASET_B2B" "$DATASET_TOTAL"; do
   bq --location="$REGION" mk --dataset --force "${PROJECT_ID}:${ds}" >/dev/null 2>&1 || true
 done
-ok "datasets พร้อม (${DATASET_B2C}, ${DATASET_B2B})"
+ok "datasets พร้อม (${DATASET_B2C}, ${DATASET_B2B}, ${DATASET_TOTAL})"
 
 # ══════════════════════ 5) Service accounts ═════════════════════════════════
 log "5) Service accounts (least privilege)"
@@ -191,7 +193,7 @@ gcloud run jobs deploy "$JOB_NAME" \
   --service-account="$SA_JOB_EMAIL" \
   --network="$NETWORK" --subnet="$SUBNET" --vpc-egress=all-traffic \
   --set-secrets="MONGODB_URI=${SECRET_MONGO}:latest,MONGODB_URI_B2B=${SECRET_MONGO_B2B}:latest,GCHAT_WEBHOOK_URL=${SECRET_GCHAT}:latest" \
-  --set-env-vars="^@^GCP_PROJECT_ID=${PROJECT_ID}@BQ_LOCATION=${REGION}@BQ_DATASET=${DATASET_B2C}@BQ_DATASET_B2B=${DATASET_B2B}@BQ_TABLE=${TABLE}@BQ_STATE_TABLE=${STATE_TABLE}@MONGO_DB=${MONGO_DB_NAME}@MONGO_COLLECTION=${TABLE}@PIPELINE_TIMEZONE=${PIPELINE_TZ}@START_DATE=${START_DATE}@LOOKBACK_DAYS=${LOOKBACK_DAYS}@EXCHANGE_RATE=${EXCHANGE_RATE}@ID_INDEX_BUFFER_HOURS=${ID_INDEX_BUFFER_HOURS}@MONGO_PACKAGE_COLLECTION=${PACKAGE_COLLECTION}@BQ_PACKAGE_TABLE=${PACKAGE_TABLE}@MONGO_USERS_DB=${USERS_DB}@MONGO_USERS_COLLECTION=${USERS_COLLECTION}@BQ_USERS_TABLE=${USERS_TABLE}@MONGO_COMPANY_COLLECTION=${COMPANY_COLLECTION}@MONGO_TEAM_COLLECTION=${TEAM_COLLECTION}@BQ_COMPANY_TABLE=${COMPANY_TABLE}@BQ_TEAM_TABLE=${TEAM_TABLE}@BQ_B2C_TABLE=${B2C_TABLE}@BQ_B2B_TABLE=${B2B_TABLE}@EXPECTED_EGRESS_IP=${EGRESS_IP}" \
+  --set-env-vars="^@^GCP_PROJECT_ID=${PROJECT_ID}@BQ_LOCATION=${REGION}@BQ_DATASET=${DATASET_B2C}@BQ_DATASET_B2B=${DATASET_B2B}@BQ_DATASET_TOTAL=${DATASET_TOTAL}@BQ_TABLE=${TABLE}@BQ_STATE_TABLE=${STATE_TABLE}@BQ_TOTAL_VIEW=${TOTAL_VIEW}@MONGO_DB=${MONGO_DB_NAME}@MONGO_COLLECTION=${TABLE}@PIPELINE_TIMEZONE=${PIPELINE_TZ}@START_DATE=${START_DATE}@LOOKBACK_DAYS=${LOOKBACK_DAYS}@EXCHANGE_RATE=${EXCHANGE_RATE}@ID_INDEX_BUFFER_HOURS=${ID_INDEX_BUFFER_HOURS}@MONGO_PACKAGE_COLLECTION=${PACKAGE_COLLECTION}@BQ_PACKAGE_TABLE=${PACKAGE_TABLE}@MONGO_USERS_DB=${USERS_DB}@MONGO_USERS_COLLECTION=${USERS_COLLECTION}@BQ_USERS_TABLE=${USERS_TABLE}@MONGO_COMPANY_COLLECTION=${COMPANY_COLLECTION}@MONGO_TEAM_COLLECTION=${TEAM_COLLECTION}@BQ_COMPANY_TABLE=${COMPANY_TABLE}@BQ_TEAM_TABLE=${TEAM_TABLE}@BQ_B2C_TABLE=${B2C_TABLE}@BQ_B2B_TABLE=${B2B_TABLE}@EXPECTED_EGRESS_IP=${EGRESS_IP}" \
   --max-retries=1 --task-timeout=3600 --memory=1Gi --cpu=1 >/dev/null
 ok "Cloud Run Job '$JOB_NAME' deployed (egress -> $EGRESS_IP)"
 

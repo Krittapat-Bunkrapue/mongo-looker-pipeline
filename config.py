@@ -85,8 +85,10 @@ class Config:
     bq_location: str
     bq_dataset: str           # dataset ของ B2C (เช่น "B2C")
     bq_dataset_b2b: str       # dataset ของ B2B (เช่น "B2B")
+    bq_dataset_total: str     # dataset ของ view รวม (เช่น "Total")
     bq_table: str             # ชื่อตาราง event (ใช้ทั้ง B2C/B2B คนละ dataset)
     bq_state_table: str
+    bq_total_view: str        # ชื่อ view รวม B2C+B2B
 
     # ── MongoDB (ชื่อ db/collection เหมือนกันทั้ง 2 server) ──
     mongo_db: str
@@ -179,6 +181,15 @@ class Config:
     def bq_b2b_agg_fqn(self) -> str:
         return self._fqn(self.bq_dataset_b2b, self.bq_b2b_table)
 
+    # ── Total view (รวม B2C + B2B) ──
+    @property
+    def bq_total_dataset_fqn(self) -> str:
+        return f"{self.gcp_project_id}.{self.bq_dataset_total}"
+
+    @property
+    def bq_total_view_fqn(self) -> str:
+        return self._fqn(self.bq_dataset_total, self.bq_total_view)
+
     def safe_summary(self) -> dict[str, str]:
         """dict สำหรับ log ได้ปลอดภัย (ความลับถูก mask)."""
         return {
@@ -238,8 +249,10 @@ def load_config() -> Config:
         bq_location=_get("BQ_LOCATION", "asia-southeast1"),
         bq_dataset=_get("BQ_DATASET", "B2C"),
         bq_dataset_b2b=_get("BQ_DATASET_B2B", "B2B"),
+        bq_dataset_total=_get("BQ_DATASET_TOTAL", "Total"),
         bq_table=_get("BQ_TABLE", "user_usage_event"),
         bq_state_table=_get("BQ_STATE_TABLE", "pipeline_state"),
+        bq_total_view=_get("BQ_TOTAL_VIEW", "user_tracking_total"),
         mongo_db=_get("MONGO_DB", "credit_service"),
         mongo_collection=_get("MONGO_COLLECTION", "user_usage_event"),
         mongo_package_collection=_get("MONGO_PACKAGE_COLLECTION", "package_master_v3"),

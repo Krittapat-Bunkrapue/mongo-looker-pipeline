@@ -271,6 +271,10 @@ def run() -> int:
         b2b_rows = aggregate.run_b2b_aggregate(client, cfg)
         log.info("B2B เสร็จ: event=%d, package=%d, B2B=%d แถว", total_rows_b2b, pkg_rows_b, b2b_rows)
 
+        # Total view (รวม B2C + B2B) — เป็น VIEW, อัปเดตตามตารางต้นทางอัตโนมัติ
+        stage = "ensure-total-view"
+        aggregate.ensure_total_view(client, cfg)
+
         notifier.success(
             processed_dates=dates,
             total_rows=total_rows,

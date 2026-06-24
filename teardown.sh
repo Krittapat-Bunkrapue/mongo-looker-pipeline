@@ -18,7 +18,7 @@ ROUTER="pipeline-router"; NAT="pipeline-nat"; ADDRESS="pipeline-egress-ip"
 REPO="pipeline-repo"; JOB_NAME="mongo-looker-job"; SCHEDULER_JOB="mongo-looker-daily"
 SA_JOB="pipeline-job-sa"; SA_SCHED="pipeline-scheduler-sa"
 SECRET_MONGO="mongodb-uri"; SECRET_MONGO_B2B="mongodb-uri-b2b"; SECRET_GCHAT="gchat-webhook-url"
-DATASETS=("B2C" "B2B")
+DATASETS=("B2C" "B2B" "Total")
 
 KEEP_DATA=0
 [[ "${1:-}" == "--keep-data" ]] && KEEP_DATA=1
