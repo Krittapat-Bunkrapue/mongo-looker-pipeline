@@ -58,6 +58,7 @@ Cloud Scheduler (06:00 Asia/Bangkok)
 |---|---|---|---|
 | `credit_service.user_usage_event` | 1 แถว/event | incremental ราย วัน (atomic partition replace) | ข้อมูล event ดิบ + `date_id`/`totalCostThb` |
 | `credit_service.package_master_v3` | 1 แถว/package | full reload ทุกรอบ | master ของ package (lean: id, name, price, ...) |
+| `credit_service.librechat_users` | 1 แถว/user | full reload ทุกรอบ | `userId` + `isBanned` (จาก db `Librechat`) — ใช้ตัด user ที่โดน ban |
 | `credit_service.pipeline_state` | 1 แถว/pipeline | upsert | watermark |
 | `credit_service.user_tracking_b2c` | 1 แถว/(month,week,date,user) | **rebuild ทุกรอบ** (BigQuery SQL) | metric B2C: Token Used, totalCostThb, Trial Conversion, Free Trial Token, package list, flags |
 
@@ -66,6 +67,9 @@ Cloud Scheduler (06:00 Asia/Bangkok)
 `aggregate.py` แปลง logic section **B2C** จาก notebook เป็น BigQuery SQL ตรง ๆ (กรอง `packageId IN (1,2,3,12)`,
 window `package_row`/`event_row`/`current_package_flag`, union Trial Conversion→Subscribe, negate eggToken)
 อ่านจาก `user_usage_event` + `package_master_v3` ที่ pipeline อัปเดตแล้ว → `CREATE OR REPLACE TABLE` (rebuild เต็ม)
+
+**ตัด user ที่โดน ban:** ก่อน aggregate ทำ **left-anti join** event กับ `librechat_users` ที่ `isBanned=TRUE`
+(ตัด event ของ user ที่โดน ban ออกตั้งแต่ระดับ event ก่อนทุก transformation)
 
 > ⚠️ **ต่างจาก notebook เดิมเล็กน้อยโดยตั้งใจ:** `date_id`/`week_id`/`month_id` ยึด **Asia/Bangkok**
 > (notebook เดิม `to_date()` ตาม tz ของ cluster ซึ่งอาจเป็น UTC) → ตัวเลขรายวันอาจต่างกันที่ event ใกล้เที่ยงคืน
