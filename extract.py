@@ -88,12 +88,18 @@ PACKAGE_PROJECTION = {
     "updatedAt": 1,
 }
 
-# projection ของ Librechat.users (เอาแค่ field ที่ใช้ตัด user ที่โดน ban)
+# projection ของ Librechat.users ฝั่ง B2C (เอาแค่ field ที่ใช้ตัด user ที่โดน ban)
 USERS_PROJECTION = {
     "_id": 0,
     "userId": 1,
     "isBanned": 1,
 }
+
+# ── B2B projections (อยู่บน B2B server) ──────────────────────────────
+# users ฝั่ง B2B ใช้ map team/company (ไม่ใช้ isBanned)
+B2B_USERS_PROJECTION = {"_id": 0, "userId": 1, "teamId": 1, "teamName": 1}
+B2B_COMPANY_PROJECTION = {"_id": 0, "companyId": 1, "companyName": 1}
+B2B_TEAM_PROJECTION = {"_id": 0, "teamId": 1, "companyId": 1}
 
 
 def day_bounds_utc(day: date, tz: ZoneInfo) -> tuple[datetime, datetime]:

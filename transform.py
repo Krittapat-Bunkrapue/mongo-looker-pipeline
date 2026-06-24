@@ -21,7 +21,14 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from load import COLUMN_NAMES, PACKAGE_COLUMN_NAMES, USERS_COLUMN_NAMES
+from load import (
+    B2B_COMPANY_COLUMN_NAMES,
+    B2B_TEAM_COLUMN_NAMES,
+    B2B_USERS_COLUMN_NAMES,
+    COLUMN_NAMES,
+    PACKAGE_COLUMN_NAMES,
+    USERS_COLUMN_NAMES,
+)
 
 # precision ของเงินที่เก็บใน BQ NUMERIC
 _MONEY_QUANT = Decimal("0.000001")
@@ -222,3 +229,38 @@ def normalize_users(
     df["_ingested_at"] = pd.to_datetime(df["_ingested_at"], utc=True)
     df["isBanned"] = df["isBanned"].astype("boolean")  # nullable bool
     return df
+
+
+# ── B2B master tables (lean, ทุก field เป็น STRING) ──────────────────
+def _normalize_string_table(
+    records: list[dict],
+    fields: tuple[str, ...],
+    columns: list[str],
+    ingested_at: datetime | None,
+) -> pd.DataFrame:
+    ingested_at = ingested_at or datetime.now(timezone.utc)
+    rows = [
+        {**{f: _to_str(d.get(f)) for f in fields}, "_ingested_at": ingested_at}
+        for d in records
+    ]
+    df = pd.DataFrame(rows, columns=columns)
+    df["_ingested_at"] = pd.to_datetime(df["_ingested_at"], utc=True)
+    return df
+
+
+def normalize_b2b_users(records: list[dict], *, ingested_at: datetime | None = None) -> pd.DataFrame:
+    """Librechat.users (B2B): userId, teamId, teamName."""
+    return _normalize_string_table(records, ("userId", "teamId", "teamName"),
+                                   B2B_USERS_COLUMN_NAMES, ingested_at)
+
+
+def normalize_b2b_company(records: list[dict], *, ingested_at: datetime | None = None) -> pd.DataFrame:
+    """Librechat.b2b_company: companyId, companyName."""
+    return _normalize_string_table(records, ("companyId", "companyName"),
+                                   B2B_COMPANY_COLUMN_NAMES, ingested_at)
+
+
+def normalize_b2b_team(records: list[dict], *, ingested_at: datetime | None = None) -> pd.DataFrame:
+    """Librechat.b2b_team: teamId, companyId."""
+    return _normalize_string_table(records, ("teamId", "companyId"),
+                                   B2B_TEAM_COLUMN_NAMES, ingested_at)

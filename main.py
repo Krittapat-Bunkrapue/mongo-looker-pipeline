@@ -26,9 +26,23 @@ import aggregate
 import load
 import state
 from config import Config, ConfigError, load_config
-from extract import PACKAGE_PROJECTION, USERS_PROJECTION, MongoExtractor
+from extract import (
+    B2B_COMPANY_PROJECTION,
+    B2B_TEAM_PROJECTION,
+    B2B_USERS_PROJECTION,
+    PACKAGE_PROJECTION,
+    USERS_PROJECTION,
+    MongoExtractor,
+)
 from notify import Notifier
-from transform import normalize_packages, normalize_records, normalize_users
+from transform import (
+    normalize_b2b_company,
+    normalize_b2b_team,
+    normalize_b2b_users,
+    normalize_packages,
+    normalize_records,
+    normalize_users,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -181,14 +195,88 @@ def run() -> int:
         # 3) rebuild ตาราง B2C ด้วย BigQuery SQL (อ่านจาก event + package ที่เพิ่งอัปเดต)
         stage = "aggregate-b2c"
         b2c_rows = aggregate.run_b2c_aggregate(client, cfg)
-
-        log.info("เสร็จสมบูรณ์: event=%d, package=%d, users=%d, B2C=%d แถว",
+        log.info("B2C เสร็จ: event=%d, package=%d, users=%d, B2C=%d แถว",
                  total_rows, pkg_rows, users_rows, b2c_rows)
+
+        # ═══════════════ B2B phase (คนละ Mongo server, dataset = B2B) ═══════════════
+        stage = "b2b-bigquery-setup"
+        load.ensure_main_table(client, cfg.bq_b2b_event_fqn)
+        load.ensure_state_table(client, cfg.bq_b2b_state_fqn)
+
+        stage = "b2b-watermark-read"
+        wm_b2b = state.get_watermark(client, cfg.bq_b2b_state_fqn, cfg.bq_table)
+        dates_b2b = compute_date_window(
+            watermark=wm_b2b,
+            start_date=cfg.start_date,
+            lookback_days=cfg.lookback_days,
+            today_local=today_local,
+        )
+
+        total_rows_b2b = 0
+        with MongoExtractor(
+            cfg.mongodb_uri_b2b,
+            cfg.mongo_db,
+            cfg.mongo_collection,
+            cfg.timezone,
+            id_buffer_hours=cfg.id_index_buffer_hours,
+        ) as ex_b2b:
+            # masters: package / users(team) / company / team (full reload)
+            stage = "b2b-extract-package"
+            pkg_rows_b = load.write_full_table(
+                client, cfg.bq_b2b_package_fqn,
+                normalize_packages(ex_b2b.extract_full(cfg.mongo_package_collection, PACKAGE_PROJECTION),
+                                   ingested_at=ingested_at),
+                load.PACKAGE_SCHEMA,
+            )
+            stage = "b2b-extract-users"
+            load.write_full_table(
+                client, cfg.bq_b2b_users_fqn,
+                normalize_b2b_users(
+                    ex_b2b.extract_full(cfg.mongo_users_collection, B2B_USERS_PROJECTION, db_name=cfg.mongo_users_db),
+                    ingested_at=ingested_at),
+                load.B2B_USERS_SCHEMA,
+            )
+            stage = "b2b-extract-company"
+            load.write_full_table(
+                client, cfg.bq_b2b_company_fqn,
+                normalize_b2b_company(
+                    ex_b2b.extract_full(cfg.mongo_company_collection, B2B_COMPANY_PROJECTION, db_name=cfg.mongo_users_db),
+                    ingested_at=ingested_at),
+                load.B2B_COMPANY_SCHEMA,
+            )
+            stage = "b2b-extract-team"
+            load.write_full_table(
+                client, cfg.bq_b2b_team_fqn,
+                normalize_b2b_team(
+                    ex_b2b.extract_full(cfg.mongo_team_collection, B2B_TEAM_PROJECTION, db_name=cfg.mongo_users_db),
+                    ingested_at=ingested_at),
+                load.B2B_TEAM_SCHEMA,
+            )
+
+            # event B2B: incremental ราย วัน (watermark แยกใน dataset B2B)
+            for day in dates_b2b:
+                stage = f"b2b-extract:{day.isoformat()}"
+                df = normalize_records(
+                    ex_b2b.extract_day(day),
+                    exchange_rate=cfg.exchange_rate,
+                    tz=cfg.timezone,
+                    ingested_at=ingested_at,
+                )
+                stage = f"b2b-load:{day.isoformat()}"
+                total_rows_b2b += load.write_day(client, cfg.bq_b2b_event_fqn, df, day)
+                stage = f"b2b-watermark:{day.isoformat()}"
+                state.set_watermark(client, cfg.bq_b2b_state_fqn, cfg.bq_table, day)
+
+        stage = "aggregate-b2b"
+        b2b_rows = aggregate.run_b2b_aggregate(client, cfg)
+        log.info("B2B เสร็จ: event=%d, package=%d, B2B=%d แถว", total_rows_b2b, pkg_rows_b, b2b_rows)
+
         notifier.success(
             processed_dates=dates,
             total_rows=total_rows,
             egress_ip=egress_ip or "n/a",
-            extra=f"package={pkg_rows:,} · users={users_rows:,} · B2C={b2c_rows:,} แถว",
+            extra=(f"B2C: pkg={pkg_rows:,} users={users_rows:,} → {b2c_rows:,} แถว | "
+                   f"B2B: event={total_rows_b2b:,} → {b2b_rows:,} แถว"),
         )
         return 0
 

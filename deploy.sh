@@ -33,19 +33,31 @@ SA_JOB="pipeline-job-sa"               # runtime SA ของ job
 SA_SCHED="pipeline-scheduler-sa"       # SA ที่ scheduler ใช้ trigger job
 
 # ── secret names ──
-SECRET_MONGO="mongodb-uri"
+SECRET_MONGO="mongodb-uri"               # B2C Mongo server
+SECRET_MONGO_B2B="mongodb-uri-b2b"       # B2B Mongo server (คนละ server)
 SECRET_GCHAT="gchat-webhook-url"
 
-# ── BigQuery ──
-DATASET="credit_service"
+# ── BigQuery datasets (B2C / B2B แยกกัน) ──
+DATASET_B2C="B2C"                        # dataset ฝั่ง B2C ใน BigQuery
+DATASET_B2B="B2B"                        # dataset ฝั่ง B2B ใน BigQuery
 TABLE="user_usage_event"
 STATE_TABLE="pipeline_state"
-PACKAGE_COLLECTION="package_master_v3"   # master table ใน Mongo (credit_service)
-PACKAGE_TABLE="package_master_v3"        # ตาราง master ใน BigQuery
-USERS_DB="Librechat"                     # users อยู่คนละ database
+
+# ── MongoDB (ชื่อ db/collection เหมือนกันทั้ง 2 server) ──
+MONGO_DB_NAME="credit_service"           # Mongo database (ไม่เกี่ยวกับชื่อ BQ dataset)
+PACKAGE_COLLECTION="package_master_v3"
+USERS_DB="Librechat"                     # users/company/team อยู่ใน db นี้
 USERS_COLLECTION="users"
-USERS_TABLE="librechat_users"            # userId + isBanned (ตัดคนโดน ban)
-B2C_TABLE="user_tracking_b2c"            # ตาราง aggregate B2C (rebuild ทุกรอบ)
+COMPANY_COLLECTION="b2b_company"         # B2B เท่านั้น
+TEAM_COLLECTION="b2b_team"               # B2B เท่านั้น
+
+# ── ชื่อตาราง BigQuery (ใช้ทั้ง 2 dataset) ──
+PACKAGE_TABLE="package_master_v3"
+USERS_TABLE="librechat_users"
+COMPANY_TABLE="b2b_company"
+TEAM_TABLE="b2b_team"
+B2C_TABLE="user_tracking_b2c"            # aggregate B2C
+B2B_TABLE="user_tracking_b2b"            # aggregate B2B
 
 # ── pipeline config ──
 START_DATE="2026-01-01"
@@ -120,19 +132,13 @@ if ! gcloud compute routers nats describe "$NAT" --router="$ROUTER" --region="$R
 fi
 ok "VPC/NAT พร้อม — egress ทั้งหมดของ subnet จะออกผ่าน $EGRESS_IP"
 
-# ══════════════════════ 4) BigQuery dataset + tables ════════════════════════
-log "4) BigQuery dataset + tables"
-bq --location="$REGION" mk --dataset --force "${PROJECT_ID}:${DATASET}" >/dev/null 2>&1 || true
-# ตารางหลัก (partition by date_id, cluster) — โค้ดก็ ensure ให้ แต่สร้างไว้ก่อนได้
-bq mk --table --force=false \
-  --time_partitioning_field=date_id --time_partitioning_type=DAY \
-  --clustering_fields=userId,eventType \
-  "${PROJECT_ID}:${DATASET}.${TABLE}" \
-  event_id:STRING,eventTimeStamp:TIMESTAMP,date_id:DATE,userId:STRING,eventType:STRING,subscriptionId:STRING,packageId:STRING,eggToken:INTEGER,chatToken:INTEGER,websearchToken:INTEGER,totalCostUsd:NUMERIC,chatCostUsd:NUMERIC,websearchCostUsd:NUMERIC,externalToken:INTEGER,externalCostUsd:NUMERIC,externalCostName:STRING,externalTransactionReference:STRING,traceId:STRING,aiModel:STRING,agentId:STRING,teamId:STRING,deductType:STRING,teamSubscriptionId:STRING,deductionBreakdown:STRING,totalCostThb:NUMERIC,_ingested_at:TIMESTAMP \
-  >/dev/null 2>&1 || true
-bq mk --table --force=false "${PROJECT_ID}:${DATASET}.${STATE_TABLE}" \
-  pipeline_name:STRING,last_processed_date:DATE,updated_at:TIMESTAMP >/dev/null 2>&1 || true
-ok "dataset/tables พร้อม (${DATASET}.${TABLE}, ${DATASET}.${STATE_TABLE})"
+# ══════════════════════ 4) BigQuery datasets (B2C + B2B) ════════════════════
+log "4) BigQuery datasets (B2C + B2B)"
+# สร้างแค่ dataset — ตารางทั้งหมด code จะ ensure/สร้างให้เอง (partition/schema ตรงกับ load.py)
+for ds in "$DATASET_B2C" "$DATASET_B2B"; do
+  bq --location="$REGION" mk --dataset --force "${PROJECT_ID}:${ds}" >/dev/null 2>&1 || true
+done
+ok "datasets พร้อม (${DATASET_B2C}, ${DATASET_B2B})"
 
 # ══════════════════════ 5) Service accounts ═════════════════════════════════
 log "5) Service accounts (least privilege)"
@@ -146,9 +152,10 @@ ok "service accounts พร้อม"
 log "6) Secret Manager"
 MISSING_SECRET=0
 ensure_secret "$SECRET_MONGO" "MONGODB_URI_VALUE"
+ensure_secret "$SECRET_MONGO_B2B" "MONGODB_URI_B2B_VALUE"
 ensure_secret "$SECRET_GCHAT" "GCHAT_WEBHOOK_URL_VALUE"
-# ให้ SA ของ job อ่าน secret ได้ (เฉพาะ 2 ตัวนี้)
-for s in "$SECRET_MONGO" "$SECRET_GCHAT"; do
+# ให้ SA ของ job อ่าน secret ได้ (เฉพาะ 3 ตัวนี้)
+for s in "$SECRET_MONGO" "$SECRET_MONGO_B2B" "$SECRET_GCHAT"; do
   gcloud secrets add-iam-policy-binding "$s" \
     --member="serviceAccount:${SA_JOB_EMAIL}" \
     --role="roles/secretmanager.secretAccessor" >/dev/null
@@ -183,8 +190,8 @@ gcloud run jobs deploy "$JOB_NAME" \
   --region="$REGION" \
   --service-account="$SA_JOB_EMAIL" \
   --network="$NETWORK" --subnet="$SUBNET" --vpc-egress=all-traffic \
-  --set-secrets="MONGODB_URI=${SECRET_MONGO}:latest,GCHAT_WEBHOOK_URL=${SECRET_GCHAT}:latest" \
-  --set-env-vars="GCP_PROJECT_ID=${PROJECT_ID},BQ_LOCATION=${REGION},BQ_DATASET=${DATASET},BQ_TABLE=${TABLE},BQ_STATE_TABLE=${STATE_TABLE},MONGO_DB=${DATASET},MONGO_COLLECTION=${TABLE},PIPELINE_TIMEZONE=${PIPELINE_TZ},START_DATE=${START_DATE},LOOKBACK_DAYS=${LOOKBACK_DAYS},EXCHANGE_RATE=${EXCHANGE_RATE},ID_INDEX_BUFFER_HOURS=${ID_INDEX_BUFFER_HOURS},MONGO_PACKAGE_COLLECTION=${PACKAGE_COLLECTION},BQ_PACKAGE_TABLE=${PACKAGE_TABLE},MONGO_USERS_DB=${USERS_DB},MONGO_USERS_COLLECTION=${USERS_COLLECTION},BQ_USERS_TABLE=${USERS_TABLE},BQ_B2C_TABLE=${B2C_TABLE},EXPECTED_EGRESS_IP=${EGRESS_IP}" \
+  --set-secrets="MONGODB_URI=${SECRET_MONGO}:latest,MONGODB_URI_B2B=${SECRET_MONGO_B2B}:latest,GCHAT_WEBHOOK_URL=${SECRET_GCHAT}:latest" \
+  --set-env-vars="^@^GCP_PROJECT_ID=${PROJECT_ID}@BQ_LOCATION=${REGION}@BQ_DATASET=${DATASET_B2C}@BQ_DATASET_B2B=${DATASET_B2B}@BQ_TABLE=${TABLE}@BQ_STATE_TABLE=${STATE_TABLE}@MONGO_DB=${MONGO_DB_NAME}@MONGO_COLLECTION=${TABLE}@PIPELINE_TIMEZONE=${PIPELINE_TZ}@START_DATE=${START_DATE}@LOOKBACK_DAYS=${LOOKBACK_DAYS}@EXCHANGE_RATE=${EXCHANGE_RATE}@ID_INDEX_BUFFER_HOURS=${ID_INDEX_BUFFER_HOURS}@MONGO_PACKAGE_COLLECTION=${PACKAGE_COLLECTION}@BQ_PACKAGE_TABLE=${PACKAGE_TABLE}@MONGO_USERS_DB=${USERS_DB}@MONGO_USERS_COLLECTION=${USERS_COLLECTION}@BQ_USERS_TABLE=${USERS_TABLE}@MONGO_COMPANY_COLLECTION=${COMPANY_COLLECTION}@MONGO_TEAM_COLLECTION=${TEAM_COLLECTION}@BQ_COMPANY_TABLE=${COMPANY_TABLE}@BQ_TEAM_TABLE=${TEAM_TABLE}@BQ_B2C_TABLE=${B2C_TABLE}@BQ_B2B_TABLE=${B2B_TABLE}@EXPECTED_EGRESS_IP=${EGRESS_IP}" \
   --max-retries=1 --task-timeout=3600 --memory=1Gi --cpu=1 >/dev/null
 ok "Cloud Run Job '$JOB_NAME' deployed (egress -> $EGRESS_IP)"
 

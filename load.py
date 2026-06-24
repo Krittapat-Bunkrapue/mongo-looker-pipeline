@@ -102,6 +102,31 @@ USERS_SCHEMA: list[bigquery.SchemaField] = [
 ]
 USERS_COLUMN_NAMES: list[str] = [f.name for f in USERS_SCHEMA]
 
+# ─────────────────────────────────────────────────────────────────────
+# B2B master tables (full reload): users (team/company), company, team
+# ─────────────────────────────────────────────────────────────────────
+B2B_USERS_SCHEMA: list[bigquery.SchemaField] = [
+    bigquery.SchemaField("userId", "STRING", mode="REQUIRED"),
+    bigquery.SchemaField("teamId", "STRING"),
+    bigquery.SchemaField("teamName", "STRING"),
+    bigquery.SchemaField("_ingested_at", "TIMESTAMP", mode="REQUIRED"),
+]
+B2B_USERS_COLUMN_NAMES: list[str] = [f.name for f in B2B_USERS_SCHEMA]
+
+B2B_COMPANY_SCHEMA: list[bigquery.SchemaField] = [
+    bigquery.SchemaField("companyId", "STRING", mode="REQUIRED"),
+    bigquery.SchemaField("companyName", "STRING"),
+    bigquery.SchemaField("_ingested_at", "TIMESTAMP", mode="REQUIRED"),
+]
+B2B_COMPANY_COLUMN_NAMES: list[str] = [f.name for f in B2B_COMPANY_SCHEMA]
+
+B2B_TEAM_SCHEMA: list[bigquery.SchemaField] = [
+    bigquery.SchemaField("teamId", "STRING", mode="REQUIRED"),
+    bigquery.SchemaField("companyId", "STRING"),
+    bigquery.SchemaField("_ingested_at", "TIMESTAMP", mode="REQUIRED"),
+]
+B2B_TEAM_COLUMN_NAMES: list[str] = [f.name for f in B2B_TEAM_SCHEMA]
+
 
 def partition_decorator(table_fqn: str, day: date) -> str:
     """คืน 'project.dataset.table$YYYYMMDD' สำหรับ load เข้า partition เดียว."""

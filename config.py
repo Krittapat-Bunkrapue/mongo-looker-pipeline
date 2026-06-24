@@ -25,7 +25,8 @@ class ConfigError(RuntimeError):
 
 # ── ชื่อ env var ที่ "ต้องมีเสมอ" (ขาดแม้แต่ตัวเดียว = fail) ────────────
 _REQUIRED_VARS: tuple[str, ...] = (
-    "MONGODB_URI",
+    "MONGODB_URI",        # B2C Mongo server
+    "MONGODB_URI_B2B",    # B2B Mongo server (คนละ server)
     "GCHAT_WEBHOOK_URL",
     "GCP_PROJECT_ID",
     "EXPECTED_EGRESS_IP",
@@ -75,27 +76,34 @@ def _parse_date(name: str, raw: str) -> date:
 @dataclass(frozen=True)
 class Config:
     # ── ความลับ ──
-    mongodb_uri: str
+    mongodb_uri: str          # B2C Mongo server
+    mongodb_uri_b2b: str      # B2B Mongo server (คนละ server)
     gchat_webhook_url: str
 
     # ── GCP / BigQuery ──
     gcp_project_id: str
     bq_location: str
-    bq_dataset: str
-    bq_table: str
+    bq_dataset: str           # dataset ของ B2C (เช่น "B2C")
+    bq_dataset_b2b: str       # dataset ของ B2B (เช่น "B2B")
+    bq_table: str             # ชื่อตาราง event (ใช้ทั้ง B2C/B2B คนละ dataset)
     bq_state_table: str
 
-    # ── MongoDB ──
+    # ── MongoDB (ชื่อ db/collection เหมือนกันทั้ง 2 server) ──
     mongo_db: str
     mongo_collection: str
     mongo_package_collection: str
-    mongo_users_db: str           # users อยู่คนละ database (Librechat)
+    mongo_users_db: str           # users/company/team อยู่ใน database Librechat
     mongo_users_collection: str
+    mongo_company_collection: str  # b2b_company (B2B เท่านั้น)
+    mongo_team_collection: str     # b2b_team (B2B เท่านั้น)
 
     # ── BigQuery: ตารางเพิ่มเติม (master + aggregate) ──
     bq_package_table: str
     bq_users_table: str
+    bq_company_table: str
+    bq_team_table: str
     bq_b2c_table: str
+    bq_b2b_table: str
 
     # ── Pipeline logic ──
     timezone: ZoneInfo
@@ -110,35 +118,73 @@ class Config:
     # ── IP drift ──
     expected_egress_ip: str
 
+    def _fqn(self, dataset: str, table: str) -> str:
+        return f"{self.gcp_project_id}.{dataset}.{table}"
+
+    # ── B2C tables (dataset = bq_dataset) ──
     @property
     def bq_table_fqn(self) -> str:
-        return f"{self.gcp_project_id}.{self.bq_dataset}.{self.bq_table}"
+        return self._fqn(self.bq_dataset, self.bq_table)
 
     @property
     def bq_state_table_fqn(self) -> str:
-        return f"{self.gcp_project_id}.{self.bq_dataset}.{self.bq_state_table}"
+        return self._fqn(self.bq_dataset, self.bq_state_table)
 
     @property
     def bq_package_table_fqn(self) -> str:
-        return f"{self.gcp_project_id}.{self.bq_dataset}.{self.bq_package_table}"
+        return self._fqn(self.bq_dataset, self.bq_package_table)
 
     @property
     def bq_users_table_fqn(self) -> str:
-        return f"{self.gcp_project_id}.{self.bq_dataset}.{self.bq_users_table}"
+        return self._fqn(self.bq_dataset, self.bq_users_table)
 
     @property
     def bq_b2c_table_fqn(self) -> str:
-        return f"{self.gcp_project_id}.{self.bq_dataset}.{self.bq_b2c_table}"
+        return self._fqn(self.bq_dataset, self.bq_b2c_table)
 
     @property
     def bq_dataset_fqn(self) -> str:
         return f"{self.gcp_project_id}.{self.bq_dataset}"
 
+    # ── B2B tables (dataset = bq_dataset_b2b) ──
+    @property
+    def bq_b2b_dataset_fqn(self) -> str:
+        return f"{self.gcp_project_id}.{self.bq_dataset_b2b}"
+
+    @property
+    def bq_b2b_event_fqn(self) -> str:
+        return self._fqn(self.bq_dataset_b2b, self.bq_table)
+
+    @property
+    def bq_b2b_state_fqn(self) -> str:
+        return self._fqn(self.bq_dataset_b2b, self.bq_state_table)
+
+    @property
+    def bq_b2b_package_fqn(self) -> str:
+        return self._fqn(self.bq_dataset_b2b, self.bq_package_table)
+
+    @property
+    def bq_b2b_users_fqn(self) -> str:
+        return self._fqn(self.bq_dataset_b2b, self.bq_users_table)
+
+    @property
+    def bq_b2b_company_fqn(self) -> str:
+        return self._fqn(self.bq_dataset_b2b, self.bq_company_table)
+
+    @property
+    def bq_b2b_team_fqn(self) -> str:
+        return self._fqn(self.bq_dataset_b2b, self.bq_team_table)
+
+    @property
+    def bq_b2b_agg_fqn(self) -> str:
+        return self._fqn(self.bq_dataset_b2b, self.bq_b2b_table)
+
     def safe_summary(self) -> dict[str, str]:
         """dict สำหรับ log ได้ปลอดภัย (ความลับถูก mask)."""
         return {
             "gcp_project_id": self.gcp_project_id,
-            "bq_table": self.bq_table_fqn,
+            "bq_b2c_dataset": self.bq_dataset,
+            "bq_b2b_dataset": self.bq_dataset_b2b,
             "mongo": f"{self.mongo_db}.{self.mongo_collection}",
             "timezone": self.timezone_name,
             "start_date": self.start_date.isoformat(),
@@ -147,6 +193,7 @@ class Config:
             "id_index_buffer_hours": str(self.id_index_buffer_hours),
             "expected_egress_ip": self.expected_egress_ip,
             "mongodb_uri": mask_secret(self.mongodb_uri),
+            "mongodb_uri_b2b": mask_secret(self.mongodb_uri_b2b),
             "gchat_webhook_url": mask_secret(self.gchat_webhook_url),
         }
 
@@ -185,10 +232,12 @@ def load_config() -> Config:
 
     return Config(
         mongodb_uri=_get("MONGODB_URI"),
+        mongodb_uri_b2b=_get("MONGODB_URI_B2B"),
         gchat_webhook_url=_get("GCHAT_WEBHOOK_URL"),
         gcp_project_id=_get("GCP_PROJECT_ID"),
         bq_location=_get("BQ_LOCATION", "asia-southeast1"),
-        bq_dataset=_get("BQ_DATASET", "credit_service"),
+        bq_dataset=_get("BQ_DATASET", "B2C"),
+        bq_dataset_b2b=_get("BQ_DATASET_B2B", "B2B"),
         bq_table=_get("BQ_TABLE", "user_usage_event"),
         bq_state_table=_get("BQ_STATE_TABLE", "pipeline_state"),
         mongo_db=_get("MONGO_DB", "credit_service"),
@@ -196,9 +245,14 @@ def load_config() -> Config:
         mongo_package_collection=_get("MONGO_PACKAGE_COLLECTION", "package_master_v3"),
         mongo_users_db=_get("MONGO_USERS_DB", "Librechat"),
         mongo_users_collection=_get("MONGO_USERS_COLLECTION", "users"),
+        mongo_company_collection=_get("MONGO_COMPANY_COLLECTION", "b2b_company"),
+        mongo_team_collection=_get("MONGO_TEAM_COLLECTION", "b2b_team"),
         bq_package_table=_get("BQ_PACKAGE_TABLE", "package_master_v3"),
         bq_users_table=_get("BQ_USERS_TABLE", "librechat_users"),
+        bq_company_table=_get("BQ_COMPANY_TABLE", "b2b_company"),
+        bq_team_table=_get("BQ_TEAM_TABLE", "b2b_team"),
         bq_b2c_table=_get("BQ_B2C_TABLE", "user_tracking_b2c"),
+        bq_b2b_table=_get("BQ_B2B_TABLE", "user_tracking_b2b"),
         timezone=tz,
         timezone_name=tz_name,
         start_date=_parse_date("START_DATE", _get("START_DATE", "2026-01-01")),

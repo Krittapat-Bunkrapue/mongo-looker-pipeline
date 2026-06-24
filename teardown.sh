@@ -17,8 +17,8 @@ NETWORK="pipeline-vpc"; SUBNET="pipeline-subnet"
 ROUTER="pipeline-router"; NAT="pipeline-nat"; ADDRESS="pipeline-egress-ip"
 REPO="pipeline-repo"; JOB_NAME="mongo-looker-job"; SCHEDULER_JOB="mongo-looker-daily"
 SA_JOB="pipeline-job-sa"; SA_SCHED="pipeline-scheduler-sa"
-SECRET_MONGO="mongodb-uri"; SECRET_GCHAT="gchat-webhook-url"
-DATASET="credit_service"
+SECRET_MONGO="mongodb-uri"; SECRET_MONGO_B2B="mongodb-uri-b2b"; SECRET_GCHAT="gchat-webhook-url"
+DATASETS=("B2C" "B2B")
 
 KEEP_DATA=0
 [[ "${1:-}" == "--keep-data" ]] && KEEP_DATA=1
@@ -50,6 +50,7 @@ gcloud artifacts repositories delete "$REPO" --location="$REGION" --quiet 2>/dev
 
 say "ลบ secrets"
 gcloud secrets delete "$SECRET_MONGO" --quiet 2>/dev/null
+gcloud secrets delete "$SECRET_MONGO_B2B" --quiet 2>/dev/null
 gcloud secrets delete "$SECRET_GCHAT" --quiet 2>/dev/null
 
 say "ลบ service accounts"
@@ -57,10 +58,12 @@ gcloud iam service-accounts delete "$SA_JOB_EMAIL" --quiet 2>/dev/null
 gcloud iam service-accounts delete "$SA_SCHED_EMAIL" --quiet 2>/dev/null
 
 if [[ "$KEEP_DATA" == "1" ]]; then
-  echo -e "\033[1;33m! เก็บ BigQuery dataset '${DATASET}' ไว้ (ตามที่ระบุ --keep-data)\033[0m"
+  echo -e "\033[1;33m! เก็บ BigQuery datasets (${DATASETS[*]}) ไว้ (ตามที่ระบุ --keep-data)\033[0m"
 else
-  say "ลบ BigQuery dataset (รวมตารางทั้งหมด)"
-  bq rm -r -f -d "${PROJECT_ID}:${DATASET}" 2>/dev/null
+  say "ลบ BigQuery datasets (รวมตารางทั้งหมด)"
+  for ds in "${DATASETS[@]}"; do
+    bq rm -r -f -d "${PROJECT_ID}:${ds}" 2>/dev/null
+  done
 fi
 
 echo -e "\n\033[1;32m✓ teardown เสร็จ — ตรวจ Billing เพื่อยืนยันว่าไม่มี resource ค้าง\033[0m"
