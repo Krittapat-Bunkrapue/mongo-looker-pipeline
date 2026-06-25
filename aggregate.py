@@ -365,6 +365,56 @@ FROM `{b2b_table_fqn}`
 """.strip()
 
 
+# suffix ของ compat view (ชื่อ field ตรงกับ Looker dashboard เดิมที่มาจาก PySpark)
+_COMPAT_SUFFIX = "_compat"
+
+
+def build_compat_view_sql(*, src_fqn: str, view_fqn: str, has_b2c: bool, has_b2b: bool,
+                          has_version: bool) -> str:
+    """
+    VIEW ที่ rename คอลัมน์ให้ตรงกับชื่อที่ Looker dashboard เดิมใช้
+    (เดิมจาก PySpark มีเว้นวรรค + month_id/week_id เป็น Number)
+    has_b2c = มีคอลัมน์เฉพาะ B2C (Trial Conversion / Free Trial Token)
+    has_b2b = มีคอลัมน์เฉพาะ B2B (team/company)
+    """
+    cols = ["version," if has_version else "",
+            "SAFE_CAST(month_id AS INT64) AS month_id",
+            "SAFE_CAST(week_id AS INT64) AS week_id",
+            "date_id", "userId", "packageName"]
+    if has_b2c:
+        cols.append("trial_conversion_cnt AS `Trial Conversion cnt`")
+    cols.append("token_used AS `Token Used`")
+    cols.append("totalCostThb")
+    if has_b2c:
+        cols.append("free_trial_token_used AS `Free Trial Token Used`")
+    cols += ["package_1", "package_2"]
+    if has_b2b:
+        cols += ["teamId", "teamName", "companyId", "companyName",
+                 "number_of_user_bin", "company_size_range"]
+    cols.append("event_row")
+    if has_b2b:
+        cols += ["company_first_event_row", "team_first_event_row"]
+    cols += ["current_package_flag", "packageId", "run_date"]
+    select_list = ",\n  ".join(c for c in cols if c)
+    return f"CREATE OR REPLACE VIEW `{view_fqn}` AS\nSELECT\n  {select_list}\nFROM `{src_fqn}`"
+
+
+def ensure_compat_views(client: bigquery.Client, cfg) -> None:
+    """สร้าง compat view ของ B2C / B2B / Total (ให้ dashboard เดิม swap source ได้ลื่น)."""
+    specs = [
+        (cfg.bq_b2c_table_fqn, True, False, False),
+        (cfg.bq_b2b_agg_fqn, False, True, False),
+        (cfg.bq_total_view_fqn, True, True, True),
+    ]
+    for src, has_b2c, has_b2b, has_version in specs:
+        sql = build_compat_view_sql(
+            src_fqn=src, view_fqn=src + _COMPAT_SUFFIX,
+            has_b2c=has_b2c, has_b2b=has_b2b, has_version=has_version,
+        )
+        client.query(sql).result()
+    log.info("ensured compat views (*%s)", _COMPAT_SUFFIX)
+
+
 def ensure_total_view(client: bigquery.Client, cfg) -> None:
     """สร้าง/อัปเดต VIEW รวม B2C+B2B."""
     sql = build_total_view_sql(

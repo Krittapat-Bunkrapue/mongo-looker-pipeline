@@ -275,6 +275,10 @@ def run() -> int:
         stage = "ensure-total-view"
         aggregate.ensure_total_view(client, cfg)
 
+        # compat views (ชื่อ field ตรงกับ Looker dashboard เดิม)
+        stage = "ensure-compat-views"
+        aggregate.ensure_compat_views(client, cfg)
+
         notifier.success(
             processed_dates=dates,
             total_rows=total_rows,
