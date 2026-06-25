@@ -164,7 +164,7 @@ SELECT
     WHEN DENSE_RANK() OVER (PARTITION BY a.userId ORDER BY a.date_id DESC) = 1 THEN 1 ELSE 0
   END AS current_package_flag,
   pk.packageId,
-  CURRENT_DATE('{tz_name}') AS run_date
+  DATE_SUB(CURRENT_DATE('{tz_name}'), INTERVAL 1 DAY) AS run_date  -- data as of (T-1)
 FROM agg a
 JOIN user_pkg up USING (userId)
 JOIN pkg pk USING (packageName)
@@ -291,7 +291,7 @@ SELECT
     WHEN DENSE_RANK() OVER (PARTITION BY a.userId ORDER BY a.date_id DESC) = 1 THEN 1 ELSE 0
   END AS current_package_flag,
   pk.packageId,
-  CURRENT_DATE('{tz_name}') AS run_date
+  DATE_SUB(CURRENT_DATE('{tz_name}'), INTERVAL 1 DAY) AS run_date  -- data as of (T-1)
 FROM agg a
 JOIN user_pkg up USING (userId)
 JOIN b2b_user bu USING (userId)
