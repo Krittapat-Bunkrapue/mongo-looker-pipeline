@@ -372,21 +372,22 @@ _COMPAT_SUFFIX = "_compat"
 def build_compat_view_sql(*, src_fqn: str, view_fqn: str, has_b2c: bool, has_b2b: bool,
                           has_version: bool) -> str:
     """
-    VIEW ที่ rename คอลัมน์ให้ตรงกับชื่อที่ Looker dashboard เดิมใช้
-    (เดิมจาก PySpark มีเว้นวรรค + month_id/week_id เป็น Number)
-    has_b2c = มีคอลัมน์เฉพาะ B2C (Trial Conversion / Free Trial Token)
+    VIEW สำหรับ Looker dashboard เดิม — cast month_id/week_id เป็น Number (INT64)
+    ให้ตรง type เดิม. ใช้ชื่อคอลัมน์ valid (snake_case) เพราะ BigQuery/Looker
+    ไม่ยอมรับเว้นวรรคในชื่อ field (จะขึ้น "Invalid field name error")
+    has_b2c = มีคอลัมน์เฉพาะ B2C (trial_conversion_cnt / free_trial_token_used)
     has_b2b = มีคอลัมน์เฉพาะ B2B (team/company)
     """
-    cols = ["version," if has_version else "",
-            "SAFE_CAST(month_id AS INT64) AS month_id",
-            "SAFE_CAST(week_id AS INT64) AS week_id",
-            "date_id", "userId", "packageName"]
+    cols: list[str] = ["version"] if has_version else []
+    cols += ["SAFE_CAST(month_id AS INT64) AS month_id",
+             "SAFE_CAST(week_id AS INT64) AS week_id",
+             "date_id", "userId", "packageName"]
     if has_b2c:
-        cols.append("trial_conversion_cnt AS `Trial Conversion cnt`")
-    cols.append("token_used AS `Token Used`")
+        cols.append("trial_conversion_cnt")
+    cols.append("token_used")
     cols.append("totalCostThb")
     if has_b2c:
-        cols.append("free_trial_token_used AS `Free Trial Token Used`")
+        cols.append("free_trial_token_used")
     cols += ["package_1", "package_2"]
     if has_b2b:
         cols += ["teamId", "teamName", "companyId", "companyName",
@@ -395,7 +396,7 @@ def build_compat_view_sql(*, src_fqn: str, view_fqn: str, has_b2c: bool, has_b2b
     if has_b2b:
         cols += ["company_first_event_row", "team_first_event_row"]
     cols += ["current_package_flag", "packageId", "run_date"]
-    select_list = ",\n  ".join(c for c in cols if c)
+    select_list = ",\n  ".join(cols)
     return f"CREATE OR REPLACE VIEW `{view_fqn}` AS\nSELECT\n  {select_list}\nFROM `{src_fqn}`"
 
 

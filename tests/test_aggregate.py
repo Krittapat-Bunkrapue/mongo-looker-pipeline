@@ -75,17 +75,17 @@ def test_total_view_unions_b2c_b2b_with_version():
     assert "CAST(NULL AS INT64) AS trial_conversion_cnt" in sql
 
 
-def test_compat_view_renames_spaced_fields():
-    # B2C compat: มี Trial Conversion cnt / Free Trial Token Used, ไม่มี team/version
+def test_compat_view_uses_valid_names_and_casts_month_week():
+    # B2C compat: ชื่อ valid (ไม่มีเว้นวรรค — BigQuery/Looker ห้าม) + month/week เป็น INT64
     sql = build_compat_view_sql(
         src_fqn="proj.B2C.user_tracking_b2c",
         view_fqn="proj.B2C.user_tracking_b2c_compat",
         has_b2c=True, has_b2b=False, has_version=False,
     )
-    assert "token_used AS `Token Used`" in sql
-    assert "trial_conversion_cnt AS `Trial Conversion cnt`" in sql
-    assert "free_trial_token_used AS `Free Trial Token Used`" in sql
+    assert "Token Used" not in sql and "Trial Conversion cnt" not in sql  # ไม่มีชื่อเว้นวรรค
+    assert "trial_conversion_cnt" in sql and "free_trial_token_used" in sql and "token_used" in sql
     assert "SAFE_CAST(month_id AS INT64) AS month_id" in sql
+    assert "SAFE_CAST(week_id AS INT64) AS week_id" in sql
     assert "teamId" not in sql
     assert "version," not in sql   # ไม่มีคอลัมน์ version (ระวัง substring ใน 'conversion')
 
@@ -97,9 +97,10 @@ def test_compat_view_total_has_version_and_b2b_cols():
         has_b2c=True, has_b2b=True, has_version=True,
     )
     assert sql.startswith("CREATE OR REPLACE VIEW `proj.Total.user_tracking_total_compat`")
-    assert "version," in sql
+    assert ",," not in sql   # กัน double-comma (เคยพลาดที่คอลัมน์ version)
+    assert "  version,\n" in sql
     assert "company_size_range" in sql
-    assert "free_trial_token_used AS `Free Trial Token Used`" in sql
+    assert "free_trial_token_used" in sql
 
 
 def test_replicates_notebook_logic_markers():
