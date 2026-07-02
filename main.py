@@ -198,6 +198,11 @@ def run() -> int:
         log.info("B2C เสร็จ: event=%d, package=%d, users=%d, B2C=%d แถว",
                  total_rows, pkg_rows, users_rows, b2c_rows)
 
+        # 3b) repeat-subscribe analysis (B2C): user_token_cycle + user_repeat_behavior
+        stage = "aggregate-repeat"
+        cycle_rows, repeat_rows = aggregate.run_repeat_aggregates(client, cfg)
+        log.info("repeat analysis เสร็จ: cycles=%d, users=%d แถว", cycle_rows, repeat_rows)
+
         # ═══════════════ B2B phase (คนละ Mongo server, dataset = B2B) ═══════════════
         stage = "b2b-bigquery-setup"
         load.ensure_main_table(client, cfg.bq_b2b_event_fqn)
@@ -284,6 +289,7 @@ def run() -> int:
             total_rows=total_rows,
             egress_ip=egress_ip or "n/a",
             extra=(f"B2C: pkg={pkg_rows:,} users={users_rows:,} → {b2c_rows:,} แถว | "
+                   f"repeat: cycles={cycle_rows:,} users={repeat_rows:,} | "
                    f"B2B: event={total_rows_b2b:,} → {b2b_rows:,} แถว"),
         )
         return 0

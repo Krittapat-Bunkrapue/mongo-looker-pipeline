@@ -34,3 +34,4 @@ Thumbs.db
 # ─── อื่น ๆ ────────────────────────────────────────────────────
 *.log
 local_*
+reports/          # generated analysis snapshots (มีข้อมูลธุรกิจ ไม่เข้า git)

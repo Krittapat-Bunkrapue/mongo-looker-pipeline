@@ -443,3 +443,360 @@ def run_b2b_aggregate(client: bigquery.Client, cfg) -> int:
     rows = client.get_table(cfg.bq_b2b_agg_fqn).num_rows
     log.info("rebuilt %s -> %d rows", cfg.bq_b2b_agg_fqn, rows)
     return rows
+
+
+# ═════════════════════════════════════════════════════════════════════
+# Repeat subscribe analysis (B2C เท่านั้น)
+#
+# Event semantics (ยืนยันจากข้อมูลจริง + เจ้าของระบบ):
+#   Subscribe     : ซื้อ (subscriptionId ใหม่), eggToken บวก = quota; ซื้อซ้ำ = reset balance
+#   Token Used(*) : ใช้ token, eggToken ลบ (รวม 'Token Used (Unsettled)')
+#   MonthlyReset  : recurring เติมรอบเดือน (id เดิม), eggToken = 0 -> quota อิง grant ล่าสุด
+#   MainExpired   : หมดอายุไม่ต่อ, eggToken ลบ = claw back token ที่เหลือ (= leftover จริง)
+#
+# Cycle = ช่วงชีวิต token 1 ก้อน: เริ่มที่ Subscribe/MonthlyReset
+# จบที่ boundary ถัดไป (Subscribe=repurchase / MonthlyReset=monthly_reset /
+# MainExpired=expired) หรือยังไม่จบ (active = censored)
+# ═════════════════════════════════════════════════════════════════════
+
+# threshold "ใช้หมด" (กันเศษ ไม่ใช้ 100% เป๊ะ)
+EXHAUST_THRESHOLD = 0.95
+# paid packages ของ B2C (trial = 12 แยกวิเคราะห์ ไม่นับใน repeat)
+_B2C_PAID_PACKAGE_IDS = "1, 2, 3"
+
+
+def build_token_cycle_sql(
+    *,
+    event_table_fqn: str,
+    package_table_fqn: str,
+    users_table_fqn: str,
+    cycle_table_fqn: str,
+    start_date: date,
+    tz_name: str,
+) -> str:
+    """ตาราง user_token_cycle: grain = user × cycle (ช่วงชีวิต token 1 ก้อน)."""
+    return f"""
+CREATE OR REPLACE TABLE `{cycle_table_fqn}`
+PARTITION BY DATE(cycle_start_ts)
+CLUSTER BY userId AS
+WITH
+banned AS (
+  SELECT DISTINCT userId FROM `{users_table_fqn}` WHERE isBanned = TRUE
+),
+pkg AS (
+  SELECT DISTINCT SAFE_CAST(packageId AS INT64) AS packageId, packageName
+  FROM `{package_table_fqn}`
+  WHERE SAFE_CAST(packageId AS INT64) IN ({_B2C_PACKAGE_IDS})
+),
+evt AS (
+  SELECT e.event_id, e.userId, e.eventType, e.subscriptionId,
+         SAFE_CAST(e.packageId AS INT64) AS packageId,
+         e.eggToken, e.eventTimeStamp, e.totalCostThb
+  FROM `{event_table_fqn}` e
+  LEFT JOIN banned b USING (userId)
+  WHERE b.userId IS NULL
+    AND SAFE_CAST(e.packageId AS INT64) IN ({_B2C_PACKAGE_IDS})
+    AND e.date_id >= DATE '{start_date.isoformat()}'
+    AND e.date_id < CURRENT_DATE('{tz_name}')
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY e.event_id ORDER BY e.eventTimeStamp) = 1
+),
+-- grant ล่าสุดต่อ user (เป็น quota ของ cycle ที่เริ่มด้วย MonthlyReset ซึ่ง eggToken=0)
+evt_ctx AS (
+  SELECT *,
+    LAST_VALUE(IF(eventType = 'Subscribe', eggToken, NULL) IGNORE NULLS)
+      OVER (PARTITION BY userId ORDER BY eventTimeStamp, event_id
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS last_grant
+  FROM evt
+),
+boundary AS (
+  SELECT userId, event_id, eventTimeStamp, eventType, subscriptionId, packageId, eggToken, last_grant
+  FROM evt_ctx
+  WHERE eventType IN ('Subscribe', 'MonthlyReset', 'MainExpired')
+  -- กัน duplicate boundary เวลาเดียวกัน (สร้าง cycle ความยาว 0)
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY userId, eventTimeStamp, eventType ORDER BY event_id) = 1
+),
+seq AS (
+  SELECT *,
+    LEAD(eventTimeStamp) OVER w AS next_ts,
+    LEAD(eventType) OVER w AS next_type,
+    LEAD(eggToken) OVER w AS next_egg
+  FROM boundary
+  WINDOW w AS (PARTITION BY userId ORDER BY eventTimeStamp, event_id)
+),
+cyc AS (
+  SELECT
+    userId, subscriptionId, packageId,
+    eventTimeStamp AS cycle_start_ts,
+    eventType AS start_type,
+    IF(eventType = 'Subscribe', eggToken, last_grant) AS quota,
+    next_ts AS cycle_end_ts,
+    CASE next_type
+      WHEN 'Subscribe' THEN 'repurchase'
+      WHEN 'MonthlyReset' THEN 'monthly_reset'
+      WHEN 'MainExpired' THEN 'expired'
+      ELSE 'active'
+    END AS end_type,
+    -- MainExpired claw back token ที่เหลือ -> |eggToken| = leftover จริง ณ วันหมดอายุ
+    IF(next_type = 'MainExpired', ABS(next_egg), NULL) AS clawback_leftover
+  FROM seq
+  WHERE eventType IN ('Subscribe', 'MonthlyReset')
+),
+-- การใช้ token ภายใน cycle + cumulative เพื่อหาจุด "ใช้หมด"
+use_evt AS (
+  SELECT c.userId, c.cycle_start_ts, c.quota,
+         u.eventTimeStamp, ABS(u.eggToken) AS used, u.totalCostThb,
+         SUM(ABS(u.eggToken)) OVER (
+           PARTITION BY c.userId, c.cycle_start_ts
+           ORDER BY u.eventTimeStamp, u.event_id
+         ) AS cum_used
+  FROM cyc c
+  JOIN evt u
+    ON u.userId = c.userId
+   AND u.eventType LIKE 'Token Used%'
+   AND u.eventTimeStamp >= c.cycle_start_ts
+   AND (c.cycle_end_ts IS NULL OR u.eventTimeStamp < c.cycle_end_ts)
+),
+use_agg AS (
+  SELECT userId, cycle_start_ts,
+         SUM(used) AS consumed,
+         SUM(totalCostThb) AS serving_cost_thb,
+         COUNT(*) AS usage_event_cnt,
+         MIN(IF(cum_used >= {EXHAUST_THRESHOLD} * quota, eventTimeStamp, NULL)) AS exhaust_ts
+  FROM use_evt
+  GROUP BY 1, 2
+)
+SELECT
+  c.userId,
+  c.subscriptionId,
+  c.packageId,
+  p.packageName,
+  (c.packageId = 12) AS is_trial,
+  c.cycle_start_ts,
+  c.start_type,
+  c.cycle_end_ts,
+  c.end_type,
+  ROW_NUMBER() OVER (PARTITION BY c.userId ORDER BY c.cycle_start_ts) AS cycle_index,
+  c.quota,
+  IFNULL(u.consumed, 0) AS consumed,
+  IFNULL(u.usage_event_cnt, 0) AS usage_event_cnt,
+  SAFE_DIVIDE(IFNULL(u.consumed, 0), c.quota) AS utilization,
+  IFNULL(IFNULL(u.consumed, 0) >= {EXHAUST_THRESHOLD} * c.quota, FALSE) AS exhausted,
+  u.exhaust_ts,
+  ROUND(TIMESTAMP_DIFF(u.exhaust_ts, c.cycle_start_ts, HOUR) / 24.0, 2) AS days_to_exhaust,
+  COALESCE(c.clawback_leftover, GREATEST(c.quota - IFNULL(u.consumed, 0), 0)) AS leftover_at_end,
+  ROUND(TIMESTAMP_DIFF(c.cycle_end_ts, c.cycle_start_ts, HOUR) / 24.0, 2) AS cycle_days,
+  IFNULL(u.serving_cost_thb, 0) AS serving_cost_thb,
+  CASE
+    WHEN c.end_type = 'active' THEN 'C0_active'
+    WHEN c.quota IS NULL THEN 'C9_unknown_quota'
+    WHEN IFNULL(u.consumed, 0) >= {EXHAUST_THRESHOLD} * c.quota AND c.end_type = 'repurchase'
+      THEN 'A1_exhausted_repurchase'
+    WHEN IFNULL(u.consumed, 0) >= {EXHAUST_THRESHOLD} * c.quota AND c.end_type = 'expired'
+      THEN 'A2_exhausted_churn'
+    WHEN IFNULL(u.consumed, 0) >= {EXHAUST_THRESHOLD} * c.quota AND c.end_type = 'monthly_reset'
+      THEN 'A3_exhausted_wait_reset'
+    WHEN c.end_type = 'repurchase' THEN 'B1_underuse_repurchase'
+    WHEN c.end_type = 'expired' THEN 'B2_underuse_churn'
+    ELSE 'B3_underuse_continue'
+  END AS segment
+FROM cyc c
+LEFT JOIN use_agg u ON u.userId = c.userId AND u.cycle_start_ts = c.cycle_start_ts
+LEFT JOIN pkg p ON p.packageId = c.packageId
+""".strip()
+
+
+def build_repeat_behavior_sql(
+    *,
+    cycle_table_fqn: str,
+    event_table_fqn: str,
+    package_table_fqn: str,
+    users_table_fqn: str,
+    repeat_table_fqn: str,
+    start_date: date,
+    tz_name: str,
+    mature_days: int = 35,
+) -> str:
+    """
+    ตาราง user_repeat_behavior: grain = user (roll-up จาก cycle + subscribe events)
+    repeat = มี paid Subscribe (packageId 1,2,3) ตั้งแต่ 2 subscription ขึ้นไป
+    (trial -> paid ครั้งแรก = conversion ไม่ใช่ repeat)
+    """
+    return f"""
+CREATE OR REPLACE TABLE `{repeat_table_fqn}` AS
+WITH
+banned AS (
+  SELECT DISTINCT userId FROM `{users_table_fqn}` WHERE isBanned = TRUE
+),
+pkg AS (
+  SELECT DISTINCT SAFE_CAST(packageId AS INT64) AS packageId, packageName, priceThb
+  FROM `{package_table_fqn}`
+  WHERE SAFE_CAST(packageId AS INT64) IN ({_B2C_PACKAGE_IDS})
+),
+evt AS (
+  SELECT e.event_id, e.userId, e.eventType, e.subscriptionId,
+         SAFE_CAST(e.packageId AS INT64) AS packageId,
+         e.eggToken, e.eventTimeStamp, e.totalCostThb, e.date_id
+  FROM `{event_table_fqn}` e
+  LEFT JOIN banned b USING (userId)
+  WHERE b.userId IS NULL
+    AND SAFE_CAST(e.packageId AS INT64) IN ({_B2C_PACKAGE_IDS})
+    AND e.date_id >= DATE '{start_date.isoformat()}'
+    AND e.date_id < CURRENT_DATE('{tz_name}')
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY e.event_id ORDER BY e.eventTimeStamp) = 1
+),
+asof AS (SELECT MAX(date_id) AS data_end FROM evt),
+-- paid subscriptions: 1 แถวต่อ subscriptionId (กัน Subscribe ซ้ำใน sub เดียว)
+paid_sub_raw AS (
+  SELECT userId, subscriptionId, packageId, eventTimeStamp
+  FROM evt
+  WHERE eventType = 'Subscribe' AND packageId IN ({_B2C_PAID_PACKAGE_IDS})
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY userId, subscriptionId ORDER BY eventTimeStamp) = 1
+),
+paid_sub AS (
+  SELECT *,
+    ROW_NUMBER() OVER (PARTITION BY userId ORDER BY eventTimeStamp) AS sub_seq,
+    LAG(eventTimeStamp) OVER (PARTITION BY userId ORDER BY eventTimeStamp) AS prev_ts
+  FROM paid_sub_raw
+),
+paid_agg AS (
+  SELECT userId,
+    COUNT(*) AS paid_subscribe_cnt,
+    MIN(eventTimeStamp) AS first_paid_ts,
+    MAX(eventTimeStamp) AS last_paid_ts,
+    ROUND(AVG(IF(sub_seq > 1, TIMESTAMP_DIFF(eventTimeStamp, prev_ts, HOUR) / 24.0, NULL)), 1)
+      AS avg_days_between_paid
+  FROM paid_sub GROUP BY 1
+),
+first_pkg AS (
+  SELECT s.userId, s.packageId AS first_paid_packageId, p.packageName AS first_paid_packageName
+  FROM paid_sub s JOIN pkg p USING (packageId)
+  WHERE s.sub_seq = 1
+),
+revenue AS (
+  -- ประมาณการจาก list price (priceThb) ของแพ็คที่ซื้อ
+  SELECT s.userId, SUM(p.priceThb) AS revenue_thb
+  FROM paid_sub s JOIN pkg p USING (packageId)
+  GROUP BY 1
+),
+trial AS (
+  SELECT userId, COUNT(DISTINCT subscriptionId) AS trial_cnt
+  FROM evt WHERE eventType = 'Subscribe' AND packageId = 12
+  GROUP BY 1
+),
+cost AS (
+  SELECT userId,
+         SUM(totalCostThb) AS serving_cost_thb,
+         SUM(ABS(eggToken)) AS tokens_used_total
+  FROM evt WHERE eventType LIKE 'Token Used%'
+  GROUP BY 1
+),
+cyc AS (SELECT * FROM `{cycle_table_fqn}`),
+cyc_flags AS (
+  SELECT *,
+    LAG(end_type) OVER (PARTITION BY userId ORDER BY cycle_start_ts) AS prev_end_type,
+    ROW_NUMBER() OVER (PARTITION BY userId ORDER BY cycle_start_ts DESC) AS rn_last
+  FROM cyc
+),
+cyc_agg AS (
+  SELECT userId,
+    COUNT(*) AS cycles_total,
+    COUNTIF(end_type != 'active') AS cycles_completed,
+    COUNTIF(NOT is_trial AND end_type != 'active') AS paid_cycles_completed,
+    COUNTIF(NOT is_trial AND end_type != 'active' AND exhausted) AS paid_cycles_exhausted,
+    LOGICAL_OR(exhausted) AS ever_exhausted,
+    ROUND(AVG(IF(NOT is_trial AND end_type != 'active', utilization, NULL)), 4) AS avg_utilization_paid,
+    ROUND(AVG(IF(NOT is_trial AND end_type = 'repurchase', leftover_at_end, NULL)), 0) AS avg_leftover_at_repurchase,
+    COUNTIF(NOT is_trial AND segment = 'A1_exhausted_repurchase') AS exhausted_repurchase_cnt,
+    COUNTIF(NOT is_trial AND segment = 'A2_exhausted_churn') AS exhausted_churn_cnt,
+    COUNTIF(NOT is_trial AND segment = 'A3_exhausted_wait_reset') AS exhausted_wait_reset_cnt,
+    COUNTIF(start_type = 'Subscribe' AND prev_end_type = 'expired') AS winback_cnt,
+    MAX(IF(rn_last = 1, end_type, NULL)) AS last_cycle_end_type,
+    ARRAY_AGG(IF(end_type = 'expired', leftover_at_end, NULL) IGNORE NULLS
+              ORDER BY cycle_start_ts DESC LIMIT 1)[SAFE_OFFSET(0)] AS last_leftover_at_churn
+  FROM cyc_flags GROUP BY 1
+),
+seg_mode AS (
+  SELECT userId, segment AS dominant_segment FROM (
+    SELECT userId, segment,
+      ROW_NUMBER() OVER (PARTITION BY userId ORDER BY COUNT(*) DESC, segment) AS rn
+    FROM cyc
+    WHERE end_type != 'active' AND NOT is_trial AND segment != 'C9_unknown_quota'
+    GROUP BY userId, segment
+  ) WHERE rn = 1
+)
+SELECT
+  c.userId,
+  IFNULL(pa.paid_subscribe_cnt, 0) AS paid_subscribe_cnt,
+  IFNULL(t.trial_cnt, 0) AS trial_cnt,
+  CASE
+    WHEN IFNULL(pa.paid_subscribe_cnt, 0) >= 2 THEN 'repeat'
+    WHEN IFNULL(pa.paid_subscribe_cnt, 0) = 1 THEN 'paid_once'
+    WHEN IFNULL(t.trial_cnt, 0) >= 1 THEN 'trial_only'
+    ELSE 'other'
+  END AS user_type,
+  (IFNULL(pa.paid_subscribe_cnt, 0) >= 2) AS is_repeat,
+  DATE(pa.first_paid_ts, '{tz_name}') AS first_paid_date,
+  DATE(pa.last_paid_ts, '{tz_name}') AS last_paid_date,
+  -- cohort ที่ "แก่พอ" จะตัดสิน repeat ได้ (ซื้อครั้งแรกมาแล้ว >= {mature_days} วัน)
+  IFNULL(DATE(pa.first_paid_ts, '{tz_name}') <= DATE_SUB(a.data_end, INTERVAL {mature_days} DAY), FALSE)
+    AS is_mature_cohort,
+  pa.avg_days_between_paid,
+  fp.first_paid_packageId,
+  fp.first_paid_packageName,
+  c.cycles_total,
+  c.cycles_completed,
+  c.paid_cycles_completed,
+  c.paid_cycles_exhausted,
+  IFNULL(c.ever_exhausted, FALSE) AS ever_exhausted,
+  c.avg_utilization_paid,
+  c.avg_leftover_at_repurchase,
+  c.exhausted_repurchase_cnt,
+  c.exhausted_churn_cnt,
+  c.exhausted_wait_reset_cnt,
+  IFNULL(c.winback_cnt, 0) AS winback_cnt,
+  (c.last_cycle_end_type = 'expired') AS churned,
+  c.last_leftover_at_churn,
+  sm.dominant_segment,
+  IFNULL(r.revenue_thb, 0) AS revenue_thb,
+  IFNULL(co.serving_cost_thb, 0) AS serving_cost_thb,
+  IFNULL(r.revenue_thb, 0) - IFNULL(co.serving_cost_thb, 0) AS margin_thb,
+  IFNULL(co.tokens_used_total, 0) AS tokens_used_total,
+  a.data_end
+FROM cyc_agg c
+CROSS JOIN asof a
+LEFT JOIN paid_agg pa USING (userId)
+LEFT JOIN trial t USING (userId)
+LEFT JOIN first_pkg fp USING (userId)
+LEFT JOIN revenue r USING (userId)
+LEFT JOIN cost co USING (userId)
+LEFT JOIN seg_mode sm USING (userId)
+""".strip()
+
+
+def run_repeat_aggregates(client: bigquery.Client, cfg) -> tuple[int, int]:
+    """rebuild ตาราง repeat-analysis 2 ตัว (cycle ก่อน แล้ว behavior อ่านจาก cycle)."""
+    cycle_sql = build_token_cycle_sql(
+        event_table_fqn=cfg.bq_table_fqn,
+        package_table_fqn=cfg.bq_package_table_fqn,
+        users_table_fqn=cfg.bq_users_table_fqn,
+        cycle_table_fqn=cfg.bq_cycle_table_fqn,
+        start_date=cfg.start_date,
+        tz_name=cfg.timezone_name,
+    )
+    client.query(cycle_sql).result()
+    cycle_rows = client.get_table(cfg.bq_cycle_table_fqn).num_rows
+    log.info("rebuilt %s -> %d rows", cfg.bq_cycle_table_fqn, cycle_rows)
+
+    behavior_sql = build_repeat_behavior_sql(
+        cycle_table_fqn=cfg.bq_cycle_table_fqn,
+        event_table_fqn=cfg.bq_table_fqn,
+        package_table_fqn=cfg.bq_package_table_fqn,
+        users_table_fqn=cfg.bq_users_table_fqn,
+        repeat_table_fqn=cfg.bq_repeat_table_fqn,
+        start_date=cfg.start_date,
+        tz_name=cfg.timezone_name,
+    )
+    client.query(behavior_sql).result()
+    repeat_rows = client.get_table(cfg.bq_repeat_table_fqn).num_rows
+    log.info("rebuilt %s -> %d rows", cfg.bq_repeat_table_fqn, repeat_rows)
+    return cycle_rows, repeat_rows

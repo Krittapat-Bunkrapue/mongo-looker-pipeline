@@ -106,6 +106,8 @@ class Config:
     bq_team_table: str
     bq_b2c_table: str
     bq_b2b_table: str
+    bq_cycle_table: str    # B2C: token cycle (grain = user × cycle)
+    bq_repeat_table: str   # B2C: repeat behavior (grain = user)
 
     # ── Pipeline logic ──
     timezone: ZoneInfo
@@ -143,6 +145,14 @@ class Config:
     @property
     def bq_b2c_table_fqn(self) -> str:
         return self._fqn(self.bq_dataset, self.bq_b2c_table)
+
+    @property
+    def bq_cycle_table_fqn(self) -> str:
+        return self._fqn(self.bq_dataset, self.bq_cycle_table)
+
+    @property
+    def bq_repeat_table_fqn(self) -> str:
+        return self._fqn(self.bq_dataset, self.bq_repeat_table)
 
     @property
     def bq_dataset_fqn(self) -> str:
@@ -266,6 +276,8 @@ def load_config() -> Config:
         bq_team_table=_get("BQ_TEAM_TABLE", "b2b_team"),
         bq_b2c_table=_get("BQ_B2C_TABLE", "user_tracking_b2c"),
         bq_b2b_table=_get("BQ_B2B_TABLE", "user_tracking_b2b"),
+        bq_cycle_table=_get("BQ_CYCLE_TABLE", "user_token_cycle"),
+        bq_repeat_table=_get("BQ_REPEAT_TABLE", "user_repeat_behavior"),
         timezone=tz,
         timezone_name=tz_name,
         start_date=_parse_date("START_DATE", _get("START_DATE", "2026-01-01")),

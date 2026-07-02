@@ -78,6 +78,8 @@ Cloud Scheduler (06:00 Asia/Bangkok)
 | `B2B . user_tracking_b2b` | TABLE | 1/(month,week,date,user) | **rebuild ทุกรอบ** |
 | `Total . user_tracking_total` | **VIEW** | union | B2C+B2B + คอลัมน์ `version` + fillna('null') |
 | `*_compat` (ทุก dataset) | **VIEW** | — | สำหรับ Looker dashboard เดิม (cast month_id/week_id เป็น INT64) |
+| `B2C . user_token_cycle` | TABLE | user × cycle | **rebuild ทุกรอบ** — repeat analysis: quota/consumed/utilization/exhausted/leftover/segment ①–⑥ |
+| `B2C . user_repeat_behavior` | TABLE | user | **rebuild ทุกรอบ** — is_repeat (paid ≥2 subs), mature cohort (35d), churned, winback, revenue/margin |
 
 ---
 
@@ -90,6 +92,10 @@ Cloud Scheduler (06:00 Asia/Bangkok)
 - ทั้งคู่: `eggToken` ของ event `Token Used` ถูก **กลับเครื่องหมาย (×-1)** ก่อน sum; `totalCostThb = totalCostUsd × 32.67`
 - `date_id`/`week_id`/`month_id` ยึด **Asia/Bangkok**; ขอบบน `< CURRENT_DATE` = cutoff เที่ยงคืน → ข้อมูล "ถึงเมื่อวาน"
 - `run_date` = **data as of (T-1)** = `DATE_SUB(CURRENT_DATE, 1)` (ไม่ใช่วันที่รัน)
+- **Repeat analysis (B2C)**: cycle = ช่วงชีวิต token (เริ่ม Subscribe/MonthlyReset, จบ Subscribe=repurchase/
+  MonthlyReset/MainExpired=expired/active=censored); MainExpired eggToken ลบ = claw back leftover จริง;
+  MonthlyReset eggToken=0 → quota อิง grant ล่าสุด; "ใช้หมด" = ≥95% quota (`EXHAUST_THRESHOLD`);
+  repeat = paid subscription (pkg 1,2,3) ≥2 — trial (12) แยกเป็น conversion; mature cohort = ซื้อครั้งแรก ≥35 วัน
 
 ---
 
