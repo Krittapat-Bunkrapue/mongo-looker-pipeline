@@ -90,19 +90,29 @@ user_pkg AS (
   FROM evt_pkg
   GROUP BY userId
 ),
--- จัดอันดับ package ของ user (สูง->ต่ำ) เพื่อแยก Subscribe / Trial Conversion
+-- จัดอันดับ package ของ user (สูง->ต่ำ) ใช้กับ free_trial_token_used
+-- + ลำดับสะสมของ Subscribe (paid/trial) ใช้ระบุ "การซื้อ paid ครั้งแรกหลัง trial"
 evt_pkg_ranked AS (
   SELECT
     evt_pkg.*,
-    DENSE_RANK() OVER (PARTITION BY userId ORDER BY packageId DESC) AS package_row
+    DENSE_RANK() OVER (PARTITION BY userId ORDER BY packageId DESC) AS package_row,
+    SUM(IF(eventType = 'Subscribe' AND packageId != 12, 1, 0)) OVER (
+      PARTITION BY userId ORDER BY eventTimeStamp, _id ROWS UNBOUNDED PRECEDING
+    ) AS paid_sub_cum,
+    SUM(IF(eventType = 'Subscribe' AND packageId = 12, 1, 0)) OVER (
+      PARTITION BY userId ORDER BY eventTimeStamp, _id ROWS UNBOUNDED PRECEDING
+    ) AS trial_sub_cum
   FROM evt_pkg
 ),
 pre_conv AS (
   SELECT
     *,
+    -- Trial Conversion = การซื้อแพ็คเสียเงิน "ครั้งแรก" ของ user ที่เคยได้ trial มาก่อน
+    -- (ครั้งเดียวต่อ user — การซื้อซ้ำครั้งถัดไปเป็น 'Subscribe' ธรรมดา)
     CASE
-      WHEN eventType = 'Subscribe' AND package_row = 1 THEN 'Subscribe'
-      WHEN eventType = 'Subscribe' AND package_row = 2 THEN 'Trial Conversion'
+      WHEN eventType = 'Subscribe' AND packageId != 12
+           AND paid_sub_cum = 1 AND trial_sub_cum >= 1 THEN 'Trial Conversion'
+      WHEN eventType = 'Subscribe' THEN 'Subscribe'
       WHEN eventType = 'Token Used' THEN 'Active'
       ELSE eventType
     END AS event_flag,

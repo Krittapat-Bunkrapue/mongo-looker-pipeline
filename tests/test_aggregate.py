@@ -103,6 +103,16 @@ def test_compat_view_total_has_version_and_b2b_cols():
     assert "free_trial_token_used" in sql
 
 
+def test_trial_conversion_counted_once_per_user():
+    sql = _sql()
+    # TC = การซื้อ paid ครั้งแรก (paid_sub_cum=1) ของคนที่เคยมี trial มาก่อน (trial_sub_cum>=1)
+    assert "paid_sub_cum = 1 AND trial_sub_cum >= 1" in sql
+    # cumulative ต้องเรียงตามเวลา (deterministic ด้วย _id)
+    assert "ORDER BY eventTimeStamp, _id ROWS UNBOUNDED PRECEDING" in sql
+    # ห้ามกลับไปใช้ rank-based TC (นับซ้ำทุกครั้งที่ซื้อแพ็คเดิม)
+    assert "package_row = 2 THEN 'Trial Conversion'" not in sql
+
+
 def test_replicates_notebook_logic_markers():
     sql = _sql()
     # eggToken กลับเครื่องหมายตอน Token Used
