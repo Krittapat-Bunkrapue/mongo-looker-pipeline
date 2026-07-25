@@ -167,6 +167,9 @@ python -m venv .venv && .venv/Scripts/pip install -r requirements-dev.txt
 | ดู log error | `gcloud logging read 'resource.type="cloud_run_job" AND severity>=ERROR' --freshness=1h --format='value(textPayload)'` |
 | นับแถวตาราง | `bq show --format=prettyjson <proj>:<ds>.<table>` (อ่าน `numRows`) |
 | Teardown ทั้งหมด | `bash teardown.sh` (หรือ `--keep-data` เก็บ dataset) |
+| สร้าง dashboard ภาพรวมธุรกิจ (HTML) | `.venv/Scripts/python scripts/make_business_dashboard.py` → `reports/business_dashboard.html` |
+
+> `reports/` ถูก gitignore (มีข้อมูลธุรกิจ) — สร้างใหม่ได้เสมอด้วยสคริปต์ข้างบน ซึ่ง query BigQuery สดผ่าน bq CLI
 
 **Workflow แก้โค้ด:** แก้ local → `pytest` → commit → `git push` → `bash deploy.sh` → `gcloud run jobs execute`
 > เปลี่ยนเฉพาะ aggregate SQL: render + `bq query < file` rebuild ได้เลย (เร็วกว่า ไม่แตะ Mongo) แต่ยังต้อง commit+redeploy ให้ job รอบ 06:00 ใช้โค้ดใหม่

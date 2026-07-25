@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ภาพรวมธุรกิจ TrueAIHub</title>
+<style>
+  .viz-root {
+    color-scheme: light;
+    --surface-1:#fcfcfb; --page:#f9f9f7;
+    --text-primary:#0b0b0b; --text-secondary:#52514e; --muted:#898781;
+    --grid:#e1e0d9; --baseline:#c3c2b7; --border:rgba(11,11,11,0.10);
+    --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a;
+    --good-text:#006300; --status-good:#0ca30c; --status-warn:#fab219;
+    --status-serious:#ec835a; --status-critical:#d03b3b;
+    --tint:#eef3fc;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root {
+      color-scheme: dark;
+      --surface-1:#1a1a19; --page:#0d0d0d;
+      --text-primary:#ffffff; --text-secondary:#c3c2b7; --muted:#898781;
+      --grid:#2c2c2a; --baseline:#383835; --border:rgba(255,255,255,0.10);
+      --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+      --good-text:#0ca30c; --tint:#20242c;
+    }
+  }
+  :root[data-theme="dark"] .viz-root {
+    color-scheme: dark;
+    --surface-1:#1a1a19; --page:#0d0d0d;
+    --text-primary:#ffffff; --text-secondary:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --baseline:#383835; --border:rgba(255,255,255,0.10);
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+    --good-text:#0ca30c; --tint:#20242c;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--page);color:var(--text-primary);
+       font-family:system-ui,-apple-system,"Segoe UI","Leelawadee UI",sans-serif;line-height:1.5}
+  .viz-root{background:var(--page);padding:28px 20px 48px}
+  .wrap{max-width:1120px;margin:0 auto}
+  h1{font-size:24px;margin:0 0 4px;letter-spacing:-0.01em}
+  .meta{color:var(--text-secondary);font-size:13px;margin-bottom:22px}
+  h2{font-size:16px;margin:0 0 2px}
+  .sub{font-size:12.5px;color:var(--muted);margin-bottom:14px}
+  .card{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin-bottom:16px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:12px;margin-bottom:16px}
+  .tile{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:14px 16px}
+  .tile-label{font-size:12.5px;color:var(--text-secondary);margin-bottom:6px}
+  .tile-value{font-size:27px;font-weight:650;letter-spacing:-0.02em;line-height:1.15}
+  .tile-foot{display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap}
+  .tile-sub,.tile-note{font-size:11.5px;color:var(--muted)}
+  .tile-note{margin-top:4px}
+  .delta{font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:3px}
+  .delta-good{color:var(--good-text)} .delta-bad{color:var(--status-critical)}
+  .delta-warn{color:var(--status-serious)} .delta-flat{color:var(--text-secondary)}
+  .sr-word{font-weight:400;font-size:11px;color:var(--text-secondary)}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px;font-size:12.5px;color:var(--text-secondary)}
+  .key{display:inline-flex;align-items:center;gap:6px}
+  .swatch{width:11px;height:11px;border-radius:3px;display:inline-block}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media (max-width:820px){.two{grid-template-columns:1fr}}
+  svg{width:100%;height:auto;display:block;overflow:visible}
+  .tt{position:fixed;pointer-events:none;background:var(--surface-1);border:1px solid var(--border);
+      border-radius:8px;padding:8px 11px;font-size:12.5px;box-shadow:0 4px 14px rgba(0,0,0,.14);
+      opacity:0;transition:opacity .1s;z-index:50;white-space:nowrap}
+  .tt b{display:block;margin-bottom:4px;font-size:12px;color:var(--text-secondary);font-weight:500}
+  .tt-row{display:flex;align-items:center;gap:7px}
+  .tt-val{font-variant-numeric:tabular-nums;font-weight:600}
+  .insight{background:var(--tint);border:1px solid var(--border);border-radius:12px;padding:14px 18px;margin-bottom:16px;font-size:13.5px}
+  .insight b{display:block;margin-bottom:3px;font-size:14px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;font-weight:600;color:var(--text-secondary);padding:7px 10px;border-bottom:1px solid var(--baseline);font-size:12px}
+  td{padding:7px 10px;border-bottom:1px solid var(--grid)}
+  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+  details{margin-top:6px}
+  summary{cursor:pointer;font-size:13px;color:var(--text-secondary);padding:6px 0}
+  .foot{font-size:12px;color:var(--muted);margin-top:22px;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="viz-root">
+<div class="wrap">
+
+  <h1>ภาพรวมธุรกิจ TrueAIHub</h1>
+  <div class="meta">ข้อมูล 2026-01-01 – 2026-07-24 · เปรียบเทียบ 30 วันล่าสุดกับ 30 วันก่อนหน้า · อัปเดตอัตโนมัติทุกวัน 06:00 น.</div>
+
+  <div class="grid">
+      <div class="tile">
+        <div class="tile-label">รายได้ (ประมาณการ)</div>
+        <div class="tile-value">฿91,141</div>
+        <div class="tile-foot">
+          <span class="delta delta-good"><span aria-hidden="true">▲</span> 7.3% <span class="sr-word">เพิ่มขึ้น</span></span>
+          <span class="tile-sub">30 วันล่าสุด</span>
+        </div>
+        
+      </div>
+      <div class="tile">
+        <div class="tile-label">ต้นทุน AI</div>
+        <div class="tile-value">฿59,299</div>
+        <div class="tile-foot">
+          <span class="delta delta-warn"><span aria-hidden="true">▲</span> 23.7% <span class="sr-word">เพิ่มขึ้น</span></span>
+          <span class="tile-sub">30 วันล่าสุด</span>
+        </div>
+        <div class="tile-note">โตเร็วกว่ารายได้</div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">กำไรขั้นต้น</div>
+        <div class="tile-value">฿31,842</div>
+        <div class="tile-foot">
+          <span class="delta delta-bad"><span aria-hidden="true">▼</span> 14.0% <span class="sr-word">ลดลง</span></span>
+          <span class="tile-sub">อัตรากำไร 35%</span>
+        </div>
+        <div class="tile-note">เดือนก่อน 44%</div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">ผู้ใช้ที่ใช้งานจริง</div>
+        <div class="tile-value">4,427 คน</div>
+        <div class="tile-foot">
+          <span class="delta delta-flat"><span aria-hidden="true">▼</span> 0.4% <span class="sr-word">ลดลง</span></span>
+          <span class="tile-sub">30 วันล่าสุด</span>
+        </div>
+        
+      </div>
+      <div class="tile">
+        <div class="tile-label">สมัครใหม่ (จ่ายเงิน)</div>
+        <div class="tile-value">159 ราย</div>
+        <div class="tile-foot">
+          <span class="delta delta-good"><span aria-hidden="true">▲</span> 3.2% <span class="sr-word">เพิ่มขึ้น</span></span>
+          <span class="tile-sub">30 วันล่าสุด</span>
+        </div>
+        
+      </div>
+      <div class="tile">
+        <div class="tile-label">เริ่มทดลองใช้ฟรี</div>
+        <div class="tile-value">1,508 ราย</div>
+        <div class="tile-foot">
+          <span class="delta delta-warn"><span aria-hidden="true">▼</span> 23.6% <span class="sr-word">ลดลง</span></span>
+          <span class="tile-sub">30 วันล่าสุด</span>
+        </div>
+        
+      </div>
+  </div>
+
+  <div class="insight">
+    <b>สิ่งที่ต้องจับตา — กำไรกำลังถูกบีบ</b>
+    ต้นทุน AI โตเร็วกว่ารายได้เกือบ 3 เท่า (+24% เทียบกับ +7%)
+    ทำให้อัตรากำไรลดจาก 44% เหลือ 35% ภายในเดือนเดียว
+    ขณะที่จำนวนผู้ใช้แทบไม่เปลี่ยน — แปลว่าผู้ใช้เดิมใช้งานหนักขึ้น (หรือย้ายไปโมเดลที่แพงขึ้น) โดยรายได้ไม่ได้ตามไปด้วย
+  </div>
+
+  <div class="card">
+    <h2>รายได้เทียบต้นทุน AI รายสัปดาห์</h2>
+    <div class="sub">หน่วยบาท · เส้นทั้งสองใช้แกนเดียวกัน จึงเทียบระยะห่างได้ตรง ๆ (ระยะห่าง = กำไรขั้นต้น)</div>
+    <div class="legend">
+      <span class="key"><span class="swatch" style="background:var(--s1)"></span> รายได้</span>
+      <span class="key"><span class="swatch" style="background:var(--s2)"></span> ต้นทุน AI</span>
+    </div>
+    <svg id="c1" viewBox="0 0 760 280" role="img" aria-label="กราฟเส้นรายได้และต้นทุน AI รายสัปดาห์"></svg>
+  </div>
+
+  <div class="card">
+    <h2>ผู้ใช้ที่ใช้งานจริงรายสัปดาห์</h2>
+    <div class="sub">นับผู้ใช้ไม่ซ้ำที่มีการใช้ token ในสัปดาห์นั้น</div>
+    <div class="legend">
+      <span class="key"><span class="swatch" style="background:var(--s1)"></span> B2C</span>
+      <span class="key"><span class="swatch" style="background:var(--s2)"></span> B2B</span>
+    </div>
+    <svg id="c2" viewBox="0 0 760 240" role="img" aria-label="กราฟเส้นผู้ใช้ที่ใช้งานจริงรายสัปดาห์ แยก B2C และ B2B"></svg>
+  </div>
+
+  <div class="two">
+    <div class="card">
+      <h2>รายได้แยกตามแพ็คเกจ</h2>
+      <div class="sub">ตลอดช่วงข้อมูล · ประมาณการจากราคาตั้ง</div>
+      <div class="legend">
+        <span class="key"><span class="swatch" style="background:var(--s1)"></span> B2C</span>
+        <span class="key"><span class="swatch" style="background:var(--s3)"></span> B2B</span>
+      </div>
+      <svg id="c3" viewBox="0 0 520 244" role="img" aria-label="กราฟแท่งรายได้แยกตามแพ็คเกจ"></svg>
+    </div>
+    <div class="card">
+      <h2>ต้นทุนแยกตามโมเดล AI</h2>
+      <div class="sub">8 อันดับแรก · ตลอดช่วงข้อมูล</div>
+      <svg id="c4" viewBox="0 0 520 260" role="img" aria-label="กราฟแท่งต้นทุนแยกตามโมเดล AI"></svg>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>สุขภาพฐานลูกค้า (B2C)</h2>
+    <div class="sub">ลูกค้าจ่ายเงินสะสม 460 ราย · ซื้อซ้ำ 11 ราย</div>
+    <div class="two" style="gap:22px;align-items:start">
+      <svg id="c5" viewBox="0 0 520 190" role="img" aria-label="กราฟแท่งสัดส่วนประเภทผู้ใช้"></svg>
+      <div>
+        <table>
+          <tr><th>ตัวชี้วัด</th><th class="n">ค่า</th></tr>
+          <tr><td>อัตราซื้อซ้ำ (ทั้งหมด)</td><td class="n">2.39%</td></tr>
+          <tr><td>อัตราซื้อซ้ำ (เฉพาะลูกค้าที่ครบ 35 วัน)</td><td class="n">3.81%</td></tr>
+          <tr><td>ทดลองฟรี → จ่ายเงิน</td><td class="n">1.47%</td></tr>
+          <tr><td>ลูกค้าที่หมดอายุแล้วไม่ต่อ</td><td class="n">181 ราย</td></tr>
+          <tr><td>รายได้เฉลี่ย — ลูกค้าซื้อซ้ำ</td><td class="n">฿1,454</td></tr>
+          <tr><td>รายได้เฉลี่ย — ลูกค้าซื้อครั้งเดียว</td><td class="n">฿554</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>ตารางข้อมูล</h2>
+    <div class="sub">ตัวเลขเดียวกับกราฟด้านบน สำหรับอ่าน/คัดลอก</div>
+    <details><summary>▸ รายได้และต้นทุนรายสัปดาห์ (22 สัปดาห์)</summary>
+      <table><tr><th>สัปดาห์เริ่ม</th><th class="n">รายได้</th><th class="n">ต้นทุน AI</th><th class="n">กำไรขั้นต้น</th></tr><tr><td>2026-02-23</td><td class='n'>฿0</td><td class='n'>฿106</td><td class='n'>฿-106</td></tr><tr><td>2026-03-02</td><td class='n'>฿659</td><td class='n'>฿2,028</td><td class='n'>฿-1,369</td></tr><tr><td>2026-03-09</td><td class='n'>฿0</td><td class='n'>฿1,078</td><td class='n'>฿-1,078</td></tr><tr><td>2026-03-16</td><td class='n'>฿0</td><td class='n'>฿2,395</td><td class='n'>฿-2,395</td></tr><tr><td>2026-03-23</td><td class='n'>฿0</td><td class='n'>฿2,461</td><td class='n'>฿-2,461</td></tr><tr><td>2026-03-30</td><td class='n'>฿4,091</td><td class='n'>฿3,295</td><td class='n'>฿796</td></tr><tr><td>2026-04-06</td><td class='n'>฿5,710</td><td class='n'>฿2,599</td><td class='n'>฿3,111</td></tr><tr><td>2026-04-13</td><td class='n'>฿6,848</td><td class='n'>฿1,575</td><td class='n'>฿5,273</td></tr><tr><td>2026-04-20</td><td class='n'>฿9,105</td><td class='n'>฿4,345</td><td class='n'>฿4,760</td></tr><tr><td>2026-04-27</td><td class='n'>฿7,426</td><td class='n'>฿7,513</td><td class='n'>฿-87</td></tr><tr><td>2026-05-04</td><td class='n'>฿22,981</td><td class='n'>฿11,148</td><td class='n'>฿11,833</td></tr><tr><td>2026-05-11</td><td class='n'>฿20,521</td><td class='n'>฿9,387</td><td class='n'>฿11,134</td></tr><tr><td>2026-05-18</td><td class='n'>฿9,681</td><td class='n'>฿11,117</td><td class='n'>฿-1,436</td></tr><tr><td>2026-05-25</td><td class='n'>฿14,394</td><td class='n'>฿10,166</td><td class='n'>฿4,228</td></tr><tr><td>2026-06-01</td><td class='n'>฿17,449</td><td class='n'>฿10,524</td><td class='n'>฿6,925</td></tr><tr><td>2026-06-08</td><td class='n'>฿21,119</td><td class='n'>฿12,902</td><td class='n'>฿8,217</td></tr><tr><td>2026-06-15</td><td class='n'>฿26,732</td><td class='n'>฿10,783</td><td class='n'>฿15,949</td></tr><tr><td>2026-06-22</td><td class='n'>฿19,551</td><td class='n'>฿11,031</td><td class='n'>฿8,520</td></tr><tr><td>2026-06-29</td><td class='n'>฿19,389</td><td class='n'>฿12,038</td><td class='n'>฿7,351</td></tr><tr><td>2026-07-06</td><td class='n'>฿25,897</td><td class='n'>฿11,530</td><td class='n'>฿14,367</td></tr><tr><td>2026-07-13</td><td class='n'>฿21,038</td><td class='n'>฿15,552</td><td class='n'>฿5,486</td></tr><tr><td>2026-07-20</td><td class='n'>฿12,315</td><td class='n'>฿14,051</td><td class='n'>฿-1,736</td></tr></table>
+    </details>
+    <details><summary>▸ แพ็คเกจ</summary>
+      <table><tr><th>แพ็คเกจ</th><th>กลุ่ม</th><th class="n">สมัคร</th><th class="n">รายได้</th><th class="n">ต้นทุน AI</th></tr><tr><td>Standard</td><td>B2C</td><td class='n'>286</td><td class='n'>฿171,314</td><td class='n'>฿28,056</td></tr><tr><td>Biz Pro</td><td>B2B</td><td class='n'>107</td><td class='n'>฿117,593</td><td class='n'>฿27,899</td></tr><tr><td>Pro</td><td>B2C</td><td class='n'>59</td><td class='n'>฿58,941</td><td class='n'>฿8,445</td></tr><tr><td>Biz Standard</td><td>B2B</td><td class='n'>55</td><td class='n'>฿36,245</td><td class='n'>฿37,470</td></tr><tr><td>Starter</td><td>B2C</td><td class='n'>127</td><td class='n'>฿32,893</td><td class='n'>฿4,205</td></tr><tr><td>Biz Starter</td><td>B2B</td><td class='n'>80</td><td class='n'>฿31,920</td><td class='n'>฿4,057</td></tr><tr><td>Instructor</td><td>B2B</td><td class='n'>3</td><td class='n'>฿3,297</td><td class='n'>฿143</td></tr></table>
+    </details>
+  </div>
+
+  <div class="foot">
+    <b>ที่มาและข้อจำกัด</b><br>
+    • ข้อมูลจาก <code>Total.summary_daily</code>, <code>Total.summary_model_daily</code>,
+      <code>Total.user_tracking_total</code> และ <code>B2C.user_repeat_behavior</code> (BigQuery) — คำนวณใหม่อัตโนมัติทุกวัน 06:00 น.<br>
+    • รายได้เป็น<b>ประมาณการจากราคาตั้ง</b>ของแพ็คเกจ ณ วันที่สมัคร ไม่รวมส่วนลด/โปรโมชัน — ฝั่ง B2B ราคาจริงอาจต่างจากราคาตั้ง<br>
+    • ต้นทุน AI คือค่าใช้จ่ายจริงจากการเรียกโมเดล (แปลงเป็นบาทที่อัตรา 32.67)<br>
+    • ผู้ใช้ที่ถูกระงับ (banned) ถูกตัดออกทั้งหมด · ตัวเลขชุดนี้รวมผู้ใช้ B2B ที่ยังไม่ผูกบริษัท จึงสูงกว่าหน้า B2B เดิมเล็กน้อย (~3%)<br>
+    • ยอด "ซื้อซ้ำ" นับเฉพาะแพ็คเกจเสียเงินตั้งแต่ 2 subscription ขึ้นไป (การเปลี่ยนจากทดลองฟรีเป็นจ่ายเงินครั้งแรกนับเป็น conversion)
+  </div>
+
+</div>
+</div>
+<div class="tt" id="tt"></div>
+
+<script>
+const DATA = {"weeks": ["2026-02-23", "2026-03-02", "2026-03-09", "2026-03-16", "2026-03-23", "2026-03-30", "2026-04-06", "2026-04-13", "2026-04-20", "2026-04-27", "2026-05-04", "2026-05-11", "2026-05-18", "2026-05-25", "2026-06-01", "2026-06-08", "2026-06-15", "2026-06-22", "2026-06-29", "2026-07-06", "2026-07-13", "2026-07-20"], "revenue": [0.0, 659.0, 0.0, 0.0, 0.0, 4091.0, 5710.0, 6848.0, 9105.0, 7426.0, 22981.0, 20521.0, 9681.0, 14394.0, 17449.0, 21119.0, 26732.0, 19551.0, 19389.0, 25897.0, 21038.0, 12315.0], "cost": [106.0, 2028.0, 1078.0, 2395.0, 2461.0, 3295.0, 2599.0, 1575.0, 4345.0, 7513.0, 11148.0, 9387.0, 11117.0, 10166.0, 10524.0, 12902.0, 10783.0, 11031.0, 12038.0, 11530.0, 15552.0, 14051.0], "uweeks": ["2026-02-23", "2026-03-02", "2026-03-09", "2026-03-16", "2026-03-23", "2026-03-30", "2026-04-06", "2026-04-13", "2026-04-20", "2026-04-27", "2026-05-04", "2026-05-11", "2026-05-18", "2026-05-25", "2026-06-01", "2026-06-08", "2026-06-15", "2026-06-22", "2026-06-29", "2026-07-06", "2026-07-13", "2026-07-20"], "b2c": [0.0, 0.0, 0.0, 0.0, 0.0, 85.0, 194.0, 153.0, 278.0, 311.0, 902.0, 788.0, 871.0, 876.0, 862.0, 1174.0, 1073.0, 1150.0, 814.0, 1037.0, 1038.0, 682.0], "b2b": [8.0, 232.0, 135.0, 127.0, 111.0, 266.0, 119.0, 77.0, 184.0, 359.0, 187.0, 193.0, 280.0, 269.0, 371.0, 212.0, 258.0, 262.0, 459.0, 247.0, 261.0, 257.0], "packages": [{"name": "Standard", "version": "B2C", "revenue": 171314.0, "subs": 286.0, "cost": 28056.0}, {"name": "Biz Pro", "version": "B2B", "revenue": 117593.0, "subs": 107.0, "cost": 27899.0}, {"name": "Pro", "version": "B2C", "revenue": 58941.0, "subs": 59.0, "cost": 8445.0}, {"name": "Biz Standard", "version": "B2B", "revenue": 36245.0, "subs": 55.0, "cost": 37470.0}, {"name": "Starter", "version": "B2C", "revenue": 32893.0, "subs": 127.0, "cost": 4205.0}, {"name": "Biz Starter", "version": "B2B", "revenue": 31920.0, "subs": 80.0, "cost": 4057.0}, {"name": "Instructor", "version": "B2B", "revenue": 3297.0, "subs": 3.0, "cost": 143.0}], "models": [{"name": "claude-sonnet-4-6", "cost": 20096.0, "tokens": 2156.0}, {"name": "gpt-5.5", "cost": 15942.0, "tokens": 1661.0}, {"name": "claude-opus-4-8", "cost": 10033.0, "tokens": 1045.0}, {"name": "dreamina-seedance-2-0-260128", "cost": 7778.0, "tokens": 804.0}, {"name": "seedance-1-0-pro-fast-251015", "cost": 6914.0, "tokens": 750.0}, {"name": "claude-opus-4-7", "cost": 6773.0, "tokens": 706.0}, {"name": "gemini-2.5-flash", "cost": 6586.0, "tokens": 698.0}, {"name": "claude-opus-4-5@20251101", "cost": 6011.0, "tokens": 630.0}], "versions": [{"v": "B2B", "revenue": 189055.0, "cost": 100970.0, "subs": 245.0, "tokens": 10479.0}, {"v": "B2C", "revenue": 263148.0, "cost": 82129.0, "subs": 472.0, "tokens": 8835.0}], "health": [{"t": "trial_only", "users": 5888.0, "rev": 0.0, "avg": 0.0}, {"t": "paid_once", "users": 449.0, "rev": 248951.0, "avg": 554.0}, {"t": "repeat", "users": 11.0, "rev": 15994.0, "avg": 1454.0}]};
+const tt = document.getElementById('tt');
+const NS = 'http://www.w3.org/2000/svg';
+const cs = getComputedStyle(document.querySelector('.viz-root'));
+const C = k => cs.getPropertyValue(k).trim();
+const el = (n, a) => { const e = document.createElementNS(NS, n);
+  for (const k in a) e.setAttribute(k, a[k]); return e; };
+const thb = v => '฿' + Math.round(v).toLocaleString('en-US');
+const int = v => Math.round(v).toLocaleString('en-US');
+const shortDate = s => { const d = new Date(s + 'T00:00:00');
+  return d.getDate() + '/' + (d.getMonth() + 1); };
+
+function showTT(evt, html) {
+  tt.innerHTML = html; tt.style.opacity = 1;
+  const r = tt.getBoundingClientRect();
+  let x = evt.clientX + 14, y = evt.clientY - r.height - 10;
+  if (x + r.width > innerWidth - 8) x = evt.clientX - r.width - 14;
+  if (y < 8) y = evt.clientY + 16;
+  tt.style.left = x + 'px'; tt.style.top = y + 'px';
+}
+const hideTT = () => tt.style.opacity = 0;
+
+/* ── line chart (แกนเดียว, หลายเส้น) ───────────────────────────── */
+function lineChart(id, labels, series, fmt) {
+  const svg = document.getElementById(id); svg.innerHTML = '';
+  const vb = svg.viewBox.baseVal, W = vb.width, H = vb.height;
+  const m = { t: 14, r: 54, b: 30, l: 58 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  // ปัดแกน y ขึ้นเป็นเลขกลม เพื่อให้ tick อ่านง่าย (0 / 8k / 16k / 24k / 32k)
+  const raw = Math.max(...series.flatMap(s => s.values)) * 1.08 || 1;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw / 4)));
+  const stepNice = [1, 2, 2.5, 5, 10].find(m => m * mag >= raw / 4) * mag;
+  const max = stepNice * 4;
+  const X = i => m.l + (labels.length < 2 ? iw / 2 : i * iw / (labels.length - 1));
+  const Y = v => m.t + ih - (v / max) * ih;
+
+  for (let k = 0; k <= 4; k++) {
+    const v = max * k / 4, y = Y(v);
+    svg.appendChild(el('line', { x1: m.l, x2: m.l + iw, y1: y, y2: y,
+      stroke: C('--grid'), 'stroke-width': 1 }));
+    const t = el('text', { x: m.l - 9, y: y + 4, 'text-anchor': 'end',
+      fill: C('--muted'), 'font-size': 11 });
+    t.textContent = fmt.axis(v); svg.appendChild(t);
+  }
+  svg.appendChild(el('line', { x1: m.l, x2: m.l + iw, y1: m.t + ih, y2: m.t + ih,
+    stroke: C('--baseline'), 'stroke-width': 1 }));
+
+  const step = Math.ceil(labels.length / 8);
+  labels.forEach((lb, i) => { if (i % step && i !== labels.length - 1) return;
+    const t = el('text', { x: X(i), y: m.t + ih + 18, 'text-anchor': 'middle',
+      fill: C('--muted'), 'font-size': 11 });
+    t.textContent = shortDate(lb); svg.appendChild(t); });
+
+  series.forEach(s => {
+    const d = s.values.map((v, i) => (i ? 'L' : 'M') + X(i) + ' ' + Y(v)).join(' ');
+    svg.appendChild(el('path', { d, fill: 'none', stroke: C(s.color),
+      'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
+  });
+
+  // direct label ปลายเส้น + กันชนกันเมื่อค่าสุดท้ายใกล้กัน
+  const li = labels.length - 1;
+  const ends = series.map((s, k) => ({ k, name: s.name, color: s.color,
+    y: Y(s.values[li]) })).sort((a, b) => a.y - b.y);
+  const MIN_GAP = 15;
+  for (let i = 1; i < ends.length; i++)
+    if (ends[i].y - ends[i - 1].y < MIN_GAP) ends[i].y = ends[i - 1].y + MIN_GAP;
+  ends.forEach(e => {
+    const dot = el('circle', { cx: X(li), cy: Y(series[e.k].values[li]), r: 3.5,
+      fill: C(e.color) });
+    svg.appendChild(dot);
+    const lab = el('text', { x: X(li) + 9, y: e.y + 4,
+      fill: C('--text-secondary'), 'font-size': 11.5, 'font-weight': 600 });
+    lab.textContent = e.name; svg.appendChild(lab);
+  });
+
+  const cross = el('line', { y1: m.t, y2: m.t + ih, stroke: C('--baseline'),
+    'stroke-width': 1, opacity: 0 });
+  svg.appendChild(cross);
+  const dots = series.map(s => {
+    const c = el('circle', { r: 4.5, fill: C(s.color), stroke: C('--surface-1'),
+      'stroke-width': 2, opacity: 0 });
+    svg.appendChild(c); return c; });
+
+  const hit = el('rect', { x: m.l, y: m.t, width: iw, height: ih,
+    fill: 'transparent', style: 'cursor:crosshair' });
+  svg.appendChild(hit);
+  hit.addEventListener('mousemove', e => {
+    const r = svg.getBoundingClientRect();
+    const px = (e.clientX - r.left) * W / r.width;
+    let i = Math.round((px - m.l) / (iw / Math.max(labels.length - 1, 1)));
+    i = Math.max(0, Math.min(labels.length - 1, i));
+    cross.setAttribute('x1', X(i)); cross.setAttribute('x2', X(i));
+    cross.setAttribute('opacity', 1);
+    let html = '<b>สัปดาห์ ' + shortDate(labels[i]) + '</b>';
+    series.forEach((s, k) => {
+      dots[k].setAttribute('cx', X(i)); dots[k].setAttribute('cy', Y(s.values[i]));
+      dots[k].setAttribute('opacity', 1);
+      html += '<div class="tt-row"><span class="swatch" style="background:' + C(s.color) +
+        '"></span>' + s.name + ' <span class="tt-val">' + fmt.tip(s.values[i]) + '</span></div>';
+    });
+    if (series.length === 2) {
+      const diff = series[0].values[i] - series[1].values[i];
+      html += '<div class="tt-row" style="margin-top:4px;color:' + C('--text-secondary') +
+        '">ส่วนต่าง <span class="tt-val">' + fmt.tip(diff) + '</span></div>';
+    }
+    showTT(e, html);
+  });
+  hit.addEventListener('mouseleave', () => {
+    hideTT(); cross.setAttribute('opacity', 0);
+    dots.forEach(d => d.setAttribute('opacity', 0));
+  });
+}
+
+/* ── horizontal bars (ปลายข้อมูลมน 4px, ฐานชิดแกน) ─────────────── */
+function barChart(id, rows, fmt, opt) {
+  opt = opt || {};
+  const svg = document.getElementById(id); svg.innerHTML = '';
+  const vb = svg.viewBox.baseVal, W = vb.width, H = vb.height;
+  const m = { t: 6, r: 74, b: 6, l: opt.labelW || 118 };
+  const iw = W - m.l - m.r;
+  const n = rows.length, gap = 2;
+  const bh = Math.min(opt.maxBar || 26, (H - m.t - m.b - gap * (n - 1)) / n);
+  const max = Math.max(...rows.map(r => r.value)) || 1;
+  const R = 4;
+
+  rows.forEach((row, i) => {
+    const y = m.t + i * ((H - m.t - m.b - gap * (n - 1)) / n + gap);
+    const w = Math.max((row.value / max) * iw, 3);
+    const rr = Math.min(R, w);
+    const d = `M${m.l} ${y} H${m.l + w - rr} A${rr} ${rr} 0 0 1 ${m.l + w} ${y + rr}` +
+              ` V${y + bh - rr} A${rr} ${rr} 0 0 1 ${m.l + w - rr} ${y + bh} H${m.l} Z`;
+    const p = el('path', { d, fill: C(row.color || '--s1'), style: 'cursor:pointer' });
+    svg.appendChild(p);
+
+    const lb = el('text', { x: m.l - 10, y: y + bh / 2 + 4, 'text-anchor': 'end',
+      fill: C('--text-primary'), 'font-size': 12 });
+    lb.textContent = row.label.length > 22 ? row.label.slice(0, 21) + '…' : row.label;
+    svg.appendChild(lb);
+
+    const vl = el('text', { x: m.l + w + 8, y: y + bh / 2 + 4,
+      fill: C('--text-secondary'), 'font-size': 11.5, 'font-weight': 600 });
+    vl.textContent = fmt.label(row.value); svg.appendChild(vl);
+
+    p.addEventListener('mousemove', e => showTT(e,
+      '<b>' + row.label + '</b>' + row.tip));
+    p.addEventListener('mouseleave', hideTT);
+  });
+}
+
+/* ── render ─────────────────────────────────────────────────────── */
+lineChart('c1', DATA.weeks, [
+  { name: 'รายได้', values: DATA.revenue, color: '--s1' },
+  { name: 'ต้นทุน', values: DATA.cost, color: '--s2' }
+], { axis: v => '฿' + (v >= 1000 ? Math.round(v / 1000) + 'k' : Math.round(v)),
+     tip: v => thb(v) });
+
+lineChart('c2', DATA.uweeks, [
+  { name: 'B2C', values: DATA.b2c, color: '--s1' },
+  { name: 'B2B', values: DATA.b2b, color: '--s2' }
+], { axis: v => int(v), tip: v => int(v) + ' คน' });
+
+barChart('c3', DATA.packages.map(p => ({
+  label: p.name, value: p.revenue, color: p.version === 'B2C' ? '--s1' : '--s3',
+  tip: '<div class="tt-row">รายได้ <span class="tt-val">' + thb(p.revenue) + '</span></div>' +
+       '<div class="tt-row">สมัคร <span class="tt-val">' + int(p.subs) + ' ราย</span></div>' +
+       '<div class="tt-row">ต้นทุน AI <span class="tt-val">' + thb(p.cost) + '</span></div>'
+})), { label: v => thb(v) }, { labelW: 106 });
+
+barChart('c4', DATA.models.map(m => ({
+  label: m.name, value: m.cost,
+  tip: '<div class="tt-row">ต้นทุน <span class="tt-val">' + thb(m.cost) + '</span></div>' +
+       '<div class="tt-row">โทเคน <span class="tt-val">' + int(m.tokens) + ' ล้าน</span></div>'
+})), { label: v => thb(v) }, { labelW: 156 });
+
+const HL = { repeat: 'ซื้อซ้ำ', paid_once: 'ซื้อครั้งเดียว', trial_only: 'ทดลองฟรีอย่างเดียว' };
+barChart('c5', DATA.health.map(h => ({
+  label: HL[h.t] || h.t, value: h.users,
+  color: h.t === 'repeat' ? '--s1' : (h.t === 'paid_once' ? '--s3' : '--s2'),
+  tip: '<div class="tt-row">จำนวน <span class="tt-val">' + int(h.users) + ' คน</span></div>' +
+       '<div class="tt-row">รายได้รวม <span class="tt-val">' + thb(h.rev) + '</span></div>' +
+       (h.avg > 0 ? '<div class="tt-row">เฉลี่ย/คน <span class="tt-val">' + thb(h.avg) + '</span></div>' : '')
+})), { label: v => int(v) + ' คน' }, { labelW: 132, maxBar: 34 });
+
+addEventListener('resize', () => hideTT());
+</script>
+</body>
+</html>
