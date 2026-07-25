@@ -80,6 +80,13 @@ Cloud Scheduler (06:00 Asia/Bangkok)
 | `*_compat` (ทุก dataset) | **VIEW** | — | สำหรับ Looker dashboard เดิม (cast month_id/week_id เป็น INT64) |
 | `B2C . user_token_cycle` | TABLE | user × cycle | **rebuild ทุกรอบ** — repeat analysis: quota/consumed/utilization/exhausted/leftover/segment ①–⑥ |
 | `B2C . user_repeat_behavior` | TABLE | user | **rebuild ทุกรอบ** — is_repeat (paid ≥2 subs), mature cohort (35d), churned, winback, revenue/margin |
+| `Total . summary_daily` | **VIEW** | version × date × package | Summary page: subscribe/trial/expire/revenue + token/cost (ฝั่งธุรกิจที่ tracking table ไม่มี) |
+| `Total . summary_model_daily` | **VIEW** | version × date × aiModel | Summary page: ต้นทุน/โทเคนแยกตามโมเดล AI |
+
+> **`has_company_mapping`** (ใน summary views): B2B มี ~46 user ที่ไม่มี team/company — `user_tracking_b2b`
+> ใช้ inner join จึงตัดทิ้ง. summary view เก็บครบ + ใส่ flag ให้กรอง → `has_company_mapping = TRUE`
+> จะ **tie out กับหน้า B2B เดิมเป๊ะ**. `daily_active_users` เป็นค่าราย "วัน" ห้ามบวกข้ามวัน
+> (นับ user ข้ามช่วงเวลาให้ใช้ `user_tracking_total` ที่เป็น grain ราย user)
 
 ---
 

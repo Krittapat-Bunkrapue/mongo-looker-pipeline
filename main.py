@@ -284,6 +284,10 @@ def run() -> int:
         stage = "ensure-compat-views"
         aggregate.ensure_compat_views(client, cfg)
 
+        # summary views สำหรับหน้า Summary Report ใน Looker
+        stage = "ensure-summary-views"
+        aggregate.ensure_summary_views(client, cfg)
+
         notifier.success(
             processed_dates=dates,
             total_rows=total_rows,

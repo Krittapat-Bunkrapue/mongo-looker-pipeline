@@ -426,6 +426,142 @@ def ensure_compat_views(client: bigquery.Client, cfg) -> None:
     log.info("ensured compat views (*%s)", _COMPAT_SUFFIX)
 
 
+# ═════════════════════════════════════════════════════════════════════
+# Summary views สำหรับหน้า "Summary Report" ใน Looker Studio
+#
+# ทำไมต้องมี: ตาราง user_tracking_* มีแต่ฝั่ง "การใช้งาน" (token/serving cost)
+# ยังไม่มีฝั่ง "ธุรกิจ" (ยอดสมัครใหม่ / trial / หมดอายุ / รายได้) และไม่มี
+# มิติ aiModel — 2 view นี้เติมช่องว่างนั้น
+#
+# กฎการกรองต้องตรงกับ user_tracking_* เป๊ะ ไม่งั้นตัวเลขจะไม่ตรงกัน:
+#   B2C: ตัด user ที่ isBanned + เฉพาะ package 1,2,3,12
+#   B2B: ตัด package 5,7,10,97,98
+# Subscribe/MainExpired นับ "ครั้งแรกของแต่ละ subscriptionId" เท่านั้น
+# (source มี event ซ้ำต่อ subscription เดียว)
+# ═════════════════════════════════════════════════════════════════════
+SUMMARY_DAILY_VIEW = "summary_daily"
+SUMMARY_MODEL_VIEW = "summary_model_daily"
+
+
+def _summary_base_cte(b2c_ds: str, b2b_ds: str, project: str) -> str:
+    """CTE ร่วม: รวม event B2C+B2B ที่กรองแล้ว + ผูกชื่อ/ราคา package."""
+    return f"""
+b2c_banned AS (
+  SELECT DISTINCT userId FROM `{project}.{b2c_ds}.librechat_users` WHERE isBanned = TRUE
+),
+-- user B2B ที่ผูก team+company ได้ (user_tracking_b2b ใช้ inner join จึงเห็นเฉพาะกลุ่มนี้)
+-- เก็บเป็น flag เพื่อให้ Looker เลือกได้: ดูภาพรวมครบ หรือกรองให้ตรงกับหน้า B2B เดิม
+b2b_mapped AS (
+  SELECT DISTINCT u.userId
+  FROM `{project}.{b2b_ds}.librechat_users` u
+  JOIN `{project}.{b2b_ds}.b2b_team` t USING (teamId)
+  JOIN `{project}.{b2b_ds}.b2b_company` c USING (companyId)
+),
+pkg AS (
+  SELECT 'B2C' AS version, SAFE_CAST(packageId AS INT64) AS packageId, packageName, priceThb
+  FROM `{project}.{b2c_ds}.package_master_v3`
+  WHERE SAFE_CAST(packageId AS INT64) IN ({_B2C_PACKAGE_IDS})
+  UNION ALL
+  SELECT 'B2B', SAFE_CAST(packageId AS INT64), packageName, priceThb
+  FROM `{project}.{b2b_ds}.package_master_v3`
+  WHERE SAFE_CAST(packageId AS INT64) NOT IN ({_B2B_EXCLUDE_PACKAGE_IDS})
+),
+evt_raw AS (
+  SELECT 'B2C' AS version, e.event_id, e.date_id, e.userId, e.eventType, e.subscriptionId,
+         e.eventTimeStamp, e.eggToken, e.totalCostThb, e.aiModel,
+         SAFE_CAST(e.packageId AS INT64) AS packageId
+  FROM `{project}.{b2c_ds}.user_usage_event` e
+  LEFT JOIN b2c_banned b USING (userId)
+  WHERE b.userId IS NULL AND SAFE_CAST(e.packageId AS INT64) IN ({_B2C_PACKAGE_IDS})
+  UNION ALL
+  SELECT 'B2B', e.event_id, e.date_id, e.userId, e.eventType, e.subscriptionId,
+         e.eventTimeStamp, e.eggToken, e.totalCostThb, e.aiModel,
+         SAFE_CAST(e.packageId AS INT64)
+  FROM `{project}.{b2b_ds}.user_usage_event` e
+  WHERE SAFE_CAST(e.packageId AS INT64) NOT IN ({_B2B_EXCLUDE_PACKAGE_IDS})
+),
+-- Subscribe / MainExpired: เก็บเฉพาะครั้งแรกของแต่ละ subscriptionId
+lifecycle_first AS (
+  SELECT * FROM evt_raw
+  WHERE eventType IN ('Subscribe', 'MainExpired')
+  QUALIFY ROW_NUMBER() OVER (
+    PARTITION BY version, eventType, subscriptionId ORDER BY eventTimeStamp, event_id
+  ) = 1
+),
+evt AS (
+  SELECT * FROM evt_raw WHERE eventType NOT IN ('Subscribe', 'MainExpired')
+  UNION ALL SELECT * FROM lifecycle_first
+),
+fact AS (
+  SELECT e.*, p.packageName, p.priceThb,
+         IFNULL(p.packageName LIKE 'Free Trial%', FALSE) AS is_trial,
+         (e.version = 'B2C' OR m.userId IS NOT NULL) AS has_company_mapping
+  FROM evt e
+  LEFT JOIN pkg p USING (version, packageId)
+  LEFT JOIN b2b_mapped m ON e.version = 'B2B' AND e.userId = m.userId
+)"""
+
+
+def build_summary_daily_sql(*, project: str, b2c_ds: str, b2b_ds: str, view_fqn: str) -> str:
+    """
+    VIEW สรุปรายวัน — grain: version × date_id × package
+    ทุก metric บวกกันข้ามวันได้ ยกเว้น daily_active_users (ตั้งชื่อให้ชัดว่าเป็นราย "วัน")
+    ถ้าต้องนับ user แบบไม่ซ้ำข้ามช่วงเวลา ให้ใช้ user_tracking_total (grain ราย user)
+    """
+    return f"""
+CREATE OR REPLACE VIEW `{view_fqn}` AS
+WITH{_summary_base_cte(b2c_ds, b2b_ds, project)}
+SELECT
+  version,
+  date_id,
+  packageId,
+  packageName,
+  is_trial,
+  has_company_mapping,
+  COUNT(DISTINCT IF(eventType LIKE 'Token Used%', userId, NULL)) AS daily_active_users,
+  COUNTIF(eventType LIKE 'Token Used%') AS usage_events,
+  SUM(IF(eventType LIKE 'Token Used%', ABS(eggToken), 0)) AS tokens_used,
+  SUM(IF(eventType LIKE 'Token Used%', totalCostThb, 0)) AS serving_cost_thb,
+  COUNTIF(eventType = 'Subscribe') AS new_subscriptions,
+  COUNTIF(eventType = 'Subscribe' AND NOT is_trial) AS new_paid_subscriptions,
+  COUNTIF(eventType = 'Subscribe' AND is_trial) AS new_trial_subscriptions,
+  COUNTIF(eventType = 'MainExpired') AS expirations,
+  COUNTIF(eventType = 'MonthlyReset') AS monthly_resets,
+  SUM(IF(eventType = 'Subscribe' AND NOT is_trial, priceThb, 0)) AS revenue_thb_est
+FROM fact
+GROUP BY 1, 2, 3, 4, 5, 6
+""".strip()
+
+
+def build_summary_model_sql(*, project: str, b2c_ds: str, b2b_ds: str, view_fqn: str) -> str:
+    """VIEW สรุปการใช้งานตามโมเดล AI — grain: version × date_id × aiModel."""
+    return f"""
+CREATE OR REPLACE VIEW `{view_fqn}` AS
+WITH{_summary_base_cte(b2c_ds, b2b_ds, project)}
+SELECT
+  version,
+  date_id,
+  IFNULL(aiModel, '(ไม่ระบุ)') AS aiModel,
+  has_company_mapping,
+  COUNT(DISTINCT userId) AS daily_active_users,
+  COUNT(*) AS usage_events,
+  SUM(ABS(eggToken)) AS tokens_used,
+  SUM(totalCostThb) AS serving_cost_thb
+FROM fact
+WHERE eventType LIKE 'Token Used%'
+GROUP BY 1, 2, 3, 4
+""".strip()
+
+
+def ensure_summary_views(client: bigquery.Client, cfg) -> None:
+    """สร้าง/อัปเดต view สรุปสำหรับหน้า Summary Report ใน Looker."""
+    common = dict(project=cfg.gcp_project_id, b2c_ds=cfg.bq_dataset, b2b_ds=cfg.bq_dataset_b2b)
+    for builder, name in ((build_summary_daily_sql, SUMMARY_DAILY_VIEW),
+                          (build_summary_model_sql, SUMMARY_MODEL_VIEW)):
+        client.query(builder(view_fqn=f"{cfg.bq_total_dataset_fqn}.{name}", **common)).result()
+    log.info("ensured summary views (%s, %s)", SUMMARY_DAILY_VIEW, SUMMARY_MODEL_VIEW)
+
+
 def ensure_total_view(client: bigquery.Client, cfg) -> None:
     """สร้าง/อัปเดต VIEW รวม B2C+B2B."""
     sql = build_total_view_sql(
