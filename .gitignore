@@ -34,4 +34,6 @@ Thumbs.db
 # ─── อื่น ๆ ────────────────────────────────────────────────────
 *.log
 local_*
-reports/          # generated analysis snapshots (มีข้อมูลธุรกิจ ไม่เข้า git)
+# generated analysis snapshots (มีข้อมูลธุรกิจ ไม่เข้า git)
+# หมายเหตุ: .gitignore ไม่รองรับ comment ต่อท้ายบรรทัด ต้องแยกบรรทัดแบบนี้เท่านั้น
+reports/
