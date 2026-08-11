@@ -109,6 +109,9 @@ class Config:
     bq_cycle_table: str    # B2C: token cycle (grain = user × cycle)
     bq_repeat_table: str   # B2C: repeat behavior (grain = user)
 
+    # ── Google Slides (ไม่บังคับ — ว่าง = ข้ามขั้นตอนอัปเดตสไลด์) ──
+    slides_presentation_id: str | None
+
     # ── Pipeline logic ──
     timezone: ZoneInfo
     timezone_name: str
@@ -200,6 +203,10 @@ class Config:
     def bq_total_view_fqn(self) -> str:
         return self._fqn(self.bq_dataset_total, self.bq_total_view)
 
+    @property
+    def bq_slide_metrics_fqn(self) -> str:
+        return self._fqn(self.bq_dataset_total, "slide_metrics")
+
     def safe_summary(self) -> dict[str, str]:
         """dict สำหรับ log ได้ปลอดภัย (ความลับถูก mask)."""
         return {
@@ -278,6 +285,7 @@ def load_config() -> Config:
         bq_b2b_table=_get("BQ_B2B_TABLE", "user_tracking_b2b"),
         bq_cycle_table=_get("BQ_CYCLE_TABLE", "user_token_cycle"),
         bq_repeat_table=_get("BQ_REPEAT_TABLE", "user_repeat_behavior"),
+        slides_presentation_id=_get("SLIDES_PRESENTATION_ID"),
         timezone=tz,
         timezone_name=tz_name,
         start_date=_parse_date("START_DATE", _get("START_DATE", "2026-01-01")),

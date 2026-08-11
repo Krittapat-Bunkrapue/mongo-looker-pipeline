@@ -24,6 +24,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 
 import aggregate
 import load
+import slides
 import state
 from config import Config, ConfigError, load_config
 from extract import (
@@ -288,13 +289,22 @@ def run() -> int:
         stage = "ensure-summary-views"
         aggregate.ensure_summary_views(client, cfg)
 
+        # slide views (ป้อนตัวเลข/กราฟให้ Google Slides deck)
+        stage = "ensure-slide-views"
+        aggregate.ensure_slide_views(client, cfg)
+
+        # อัปเดตตัวเลขใน Google Slides (ข้ามเองถ้าไม่ได้ตั้ง SLIDES_PRESENTATION_ID)
+        stage = "update-slides"
+        slides_updated = slides.update_presentation(cfg, client)
+
         notifier.success(
             processed_dates=dates,
             total_rows=total_rows,
             egress_ip=egress_ip or "n/a",
             extra=(f"B2C: pkg={pkg_rows:,} users={users_rows:,} → {b2c_rows:,} แถว | "
                    f"repeat: cycles={cycle_rows:,} users={repeat_rows:,} | "
-                   f"B2B: event={total_rows_b2b:,} → {b2b_rows:,} แถว"),
+                   f"B2B: event={total_rows_b2b:,} → {b2b_rows:,} แถว"
+                   + (f" | Slides: {slides_updated} จุด" if slides_updated else "")),
         )
         return 0
 

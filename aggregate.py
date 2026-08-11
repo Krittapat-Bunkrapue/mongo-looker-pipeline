@@ -562,6 +562,198 @@ def ensure_summary_views(client: bigquery.Client, cfg) -> None:
     log.info("ensured summary views (%s, %s)", SUMMARY_DAILY_VIEW, SUMMARY_MODEL_VIEW)
 
 
+# ═════════════════════════════════════════════════════════════════════
+# Slide views — ป้อนตัวเลข/กราฟให้ Google Slides deck (โครงต้นไม้ผู้ใช้)
+#
+# นิยาม: 1 user นับครั้งเดียว จัดกลุ่มตาม "แพ็คเกจล่าสุดที่สมัคร"
+#        (Subscribe event ล่าสุด) จึงบวกกันได้ลงตัวแบบเดียวกับสไลด์
+#        B2C = Subscriber(Starter+Standard+Pro) + Free Trial
+#        B2B = Subscriber(Biz Starter+Standard+Pro) + Others
+# ═════════════════════════════════════════════════════════════════════
+SLIDE_METRICS_VIEW = "slide_metrics"
+SLIDE_COMPANY_SIZE_VIEW = "slide_company_size"
+SLIDE_NEW_USERS_VIEW = "slide_new_users_weekly"
+
+_B2B_SUBSCRIBER_PACKAGES = "'Biz Starter', 'Biz Standard', 'Biz Pro'"
+_B2C_SUBSCRIBER_PACKAGES = "'Starter', 'Standard', 'Pro'"
+
+
+def _slide_base_cte(project: str, b2c_ds: str, b2b_ds: str) -> str:
+    """CTE ร่วม: subscribe event (ตัดซ้ำต่อ subscription) + แพ็คเกจล่าสุดต่อ user."""
+    return f"""
+b2c_banned AS (
+  SELECT DISTINCT userId FROM `{project}.{b2c_ds}.librechat_users` WHERE isBanned = TRUE
+),
+pkg AS (
+  SELECT 'B2C' AS v, SAFE_CAST(packageId AS INT64) AS pid, packageName
+  FROM `{project}.{b2c_ds}.package_master_v3`
+  UNION ALL
+  SELECT 'B2B', SAFE_CAST(packageId AS INT64), packageName
+  FROM `{project}.{b2b_ds}.package_master_v3`
+),
+sub_raw AS (
+  SELECT 'B2C' AS v, e.userId, SAFE_CAST(e.packageId AS INT64) AS pid,
+         e.eventTimeStamp, e.date_id, e.subscriptionId, e.event_id
+  FROM `{project}.{b2c_ds}.user_usage_event` e
+  LEFT JOIN b2c_banned b USING (userId)
+  WHERE e.eventType = 'Subscribe' AND b.userId IS NULL
+  UNION ALL
+  SELECT 'B2B', userId, SAFE_CAST(packageId AS INT64),
+         eventTimeStamp, date_id, subscriptionId, event_id
+  FROM `{project}.{b2b_ds}.user_usage_event`
+  WHERE eventType = 'Subscribe'
+    AND SAFE_CAST(packageId AS INT64) NOT IN ({_B2B_EXCLUDE_PACKAGE_IDS})
+),
+-- 1 แถวต่อ 1 subscription (source มี Subscribe ซ้ำต่อ subscription เดียว)
+sub AS (
+  SELECT * FROM sub_raw
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY v, subscriptionId ORDER BY eventTimeStamp, event_id) = 1
+),
+-- แพ็คเกจ "ปัจจุบัน" ของแต่ละ user = แพ็คของ subscription ล่าสุด
+latest AS (
+  SELECT v, userId, pid FROM sub
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY v, userId ORDER BY eventTimeStamp DESC, event_id DESC) = 1
+),
+u AS (
+  SELECT l.v, l.userId, p.packageName AS pkg
+  FROM latest l JOIN pkg p ON p.v = l.v AND p.pid = l.pid
+),
+-- ผู้ใช้ B2C ที่เคยได้ trial แล้วต่อมาสมัครแพ็คเสียเงิน = Free Trial Conversion
+conv AS (
+  SELECT userId, MIN(IF(pid != 12, eventTimeStamp, NULL)) AS first_paid_ts
+  FROM sub WHERE v = 'B2C'
+  GROUP BY userId
+  HAVING COUNTIF(pid = 12) > 0 AND COUNTIF(pid != 12) > 0
+),
+conv_pkg AS (
+  SELECT c.userId, p.packageName AS to_pkg
+  FROM conv c
+  JOIN sub s ON s.v = 'B2C' AND s.userId = c.userId AND s.eventTimeStamp = c.first_paid_ts
+  JOIN pkg p ON p.v = 'B2C' AND p.pid = s.pid
+)"""
+
+
+def build_slide_metrics_sql(*, project: str, b2c_ds: str, b2b_ds: str,
+                            view_fqn: str, tz_name: str) -> str:
+    """
+    VIEW แบบ long format: 1 แถว = 1 ตัวเลขบนสไลด์
+    คอลัมน์ metric_key ใช้เป็นชื่อ placeholder ในสไลด์ (เช่น {{total_users}})
+    """
+    return f"""
+CREATE OR REPLACE VIEW `{view_fqn}` AS
+WITH{_slide_base_cte(project, b2c_ds, b2b_ds)},
+m AS (
+  SELECT 'total_users' AS metric_key, 'ผู้ใช้ทั้งหมด' AS metric_label,
+         (SELECT COUNT(*) FROM u) AS value_num, 1 AS sort_order
+  UNION ALL SELECT 'b2c_users', 'ผู้ใช้ B2C', (SELECT COUNTIF(v='B2C') FROM u), 2
+  UNION ALL SELECT 'b2b_users', 'ผู้ใช้ B2B', (SELECT COUNTIF(v='B2B') FROM u), 3
+  -- B2C
+  UNION ALL SELECT 'b2c_subscriber', 'B2C ผู้สมัครแบบเสียเงิน',
+    (SELECT COUNTIF(v='B2C' AND pkg IN ({_B2C_SUBSCRIBER_PACKAGES})) FROM u), 10
+  UNION ALL SELECT 'b2c_starter', 'B2C Starter',
+    (SELECT COUNTIF(v='B2C' AND pkg='Starter') FROM u), 11
+  UNION ALL SELECT 'b2c_standard', 'B2C Standard',
+    (SELECT COUNTIF(v='B2C' AND pkg='Standard') FROM u), 12
+  UNION ALL SELECT 'b2c_pro', 'B2C Pro',
+    (SELECT COUNTIF(v='B2C' AND pkg='Pro') FROM u), 13
+  UNION ALL SELECT 'b2c_free_trial', 'B2C Free Trial',
+    (SELECT COUNTIF(v='B2C' AND pkg NOT IN ({_B2C_SUBSCRIBER_PACKAGES})) FROM u), 14
+  -- Free Trial Conversion
+  UNION ALL SELECT 'free_trial_conversion', 'Free Trial Conversion',
+    (SELECT COUNT(*) FROM conv_pkg), 20
+  UNION ALL SELECT 'to_starter', 'แปลงเป็น Starter',
+    (SELECT COUNTIF(to_pkg='Starter') FROM conv_pkg), 21
+  UNION ALL SELECT 'to_standard', 'แปลงเป็น Standard',
+    (SELECT COUNTIF(to_pkg='Standard') FROM conv_pkg), 22
+  UNION ALL SELECT 'to_pro', 'แปลงเป็น Pro',
+    (SELECT COUNTIF(to_pkg='Pro') FROM conv_pkg), 23
+  -- B2B
+  UNION ALL SELECT 'b2b_subscriber', 'B2B ผู้สมัครแบบเสียเงิน',
+    (SELECT COUNTIF(v='B2B' AND pkg IN ({_B2B_SUBSCRIBER_PACKAGES})) FROM u), 30
+  UNION ALL SELECT 'b2b_biz_starter', 'B2B Biz Starter',
+    (SELECT COUNTIF(v='B2B' AND pkg='Biz Starter') FROM u), 31
+  UNION ALL SELECT 'b2b_biz_standard', 'B2B Biz Standard',
+    (SELECT COUNTIF(v='B2B' AND pkg='Biz Standard') FROM u), 32
+  UNION ALL SELECT 'b2b_biz_pro', 'B2B Biz Pro',
+    (SELECT COUNTIF(v='B2B' AND pkg='Biz Pro') FROM u), 33
+  UNION ALL SELECT 'b2b_others', 'B2B อื่น ๆ (trial/ภายใน)',
+    (SELECT COUNTIF(v='B2B' AND pkg NOT IN ({_B2B_SUBSCRIBER_PACKAGES})) FROM u), 34
+  -- บริษัท
+  UNION ALL SELECT 'b2b_companies', 'จำนวนบริษัท B2B',
+    (SELECT COUNT(DISTINCT companyId) FROM `{project}.{b2b_ds}.user_tracking_b2b`), 40
+)
+SELECT
+  metric_key, metric_label, value_num,
+  FORMAT("%'d", value_num) AS value_display,
+  sort_order,
+  (SELECT MAX(date_id) FROM sub) AS data_end,
+  FORMAT_DATE('%e %B %Y', (SELECT MAX(date_id) FROM sub)) AS period_display,
+  CURRENT_TIMESTAMP() AS generated_at
+FROM m
+ORDER BY sort_order
+""".strip()
+
+
+def build_slide_company_size_sql(*, project: str, b2b_ds: str, view_fqn: str) -> str:
+    """VIEW กราฟ '# Company by company size' — 1 แถว = 1 ช่วงขนาดบริษัท."""
+    return f"""
+CREATE OR REPLACE VIEW `{view_fqn}` AS
+SELECT
+  company_size_range,
+  MIN(number_of_user_bin) AS bin_order,
+  COUNT(DISTINCT companyId) AS companies,
+  COUNT(DISTINCT userId) AS users
+FROM `{project}.{b2b_ds}.user_tracking_b2b`
+GROUP BY company_size_range
+ORDER BY bin_order
+""".strip()
+
+
+def build_slide_new_users_sql(*, project: str, b2c_ds: str, b2b_ds: str,
+                              view_fqn: str) -> str:
+    """
+    VIEW กราฟ 'New User' รายสัปดาห์ + ยอดสะสม (แยก B2C/B2B)
+    นับผู้ใช้ใหม่จากสัปดาห์ที่ subscribe ครั้งแรก
+    """
+    return f"""
+CREATE OR REPLACE VIEW `{view_fqn}` AS
+WITH{_slide_base_cte(project, b2c_ds, b2b_ds)},
+first_sub AS (
+  SELECT v, userId, MIN(date_id) AS first_date FROM sub GROUP BY 1, 2
+),
+wk AS (
+  SELECT v AS segment,
+         DATE_TRUNC(first_date, WEEK(MONDAY)) AS week_start,
+         COUNT(*) AS new_users
+  FROM first_sub GROUP BY 1, 2
+)
+SELECT
+  segment,
+  week_start,
+  FORMAT_DATE('%G%V', week_start) AS week_id,
+  new_users,
+  SUM(new_users) OVER (PARTITION BY segment ORDER BY week_start) AS new_users_cumulative
+FROM wk
+ORDER BY segment, week_start
+""".strip()
+
+
+def ensure_slide_views(client: bigquery.Client, cfg) -> None:
+    """สร้าง/อัปเดต view ที่ป้อนตัวเลขและกราฟให้ Google Slides deck."""
+    ds = cfg.bq_total_dataset_fqn
+    client.query(build_slide_metrics_sql(
+        project=cfg.gcp_project_id, b2c_ds=cfg.bq_dataset, b2b_ds=cfg.bq_dataset_b2b,
+        view_fqn=f"{ds}.{SLIDE_METRICS_VIEW}", tz_name=cfg.timezone_name)).result()
+    client.query(build_slide_company_size_sql(
+        project=cfg.gcp_project_id, b2b_ds=cfg.bq_dataset_b2b,
+        view_fqn=f"{ds}.{SLIDE_COMPANY_SIZE_VIEW}")).result()
+    client.query(build_slide_new_users_sql(
+        project=cfg.gcp_project_id, b2c_ds=cfg.bq_dataset, b2b_ds=cfg.bq_dataset_b2b,
+        view_fqn=f"{ds}.{SLIDE_NEW_USERS_VIEW}")).result()
+    log.info("ensured slide views (%s, %s, %s)",
+             SLIDE_METRICS_VIEW, SLIDE_COMPANY_SIZE_VIEW, SLIDE_NEW_USERS_VIEW)
+
+
 def ensure_total_view(client: bigquery.Client, cfg) -> None:
     """สร้าง/อัปเดต VIEW รวม B2C+B2B."""
     sql = build_total_view_sql(
